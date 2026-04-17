@@ -16,18 +16,18 @@ ct = xc.CatSim("./cfg/Phantom_Sample", "./cfg/Scanner_Sample_generic", "./cfg/Pr
 
 ##--------- Make changes to parameters (optional)
 ct.resultsName = "test"
-ct.protocol.viewsPerRotation = 500
+ct.protocol.viewsPerRotation = 1000
 ct.protocol.viewCount = ct.protocol.viewsPerRotation
 ct.protocol.stopViewId = ct.protocol.viewCount-1
 # ct.protocol.scanTypes = [1, 0, 0, 0]  # flags for airscan, offset scan, phantom scan, prep
 # ct.load_cfg("Protocol_Sample_axial", "Physics_Sample", "Recon_Sample_2d")  # new cfg overrides existing parameters
 
 ct.protocol.mA = 800
-ct.scanner.detectorRowsPerMod = 4
+ct.scanner.detectorRowsPerMod = 1
 ct.scanner.detectorRowCount = ct.scanner.detectorRowsPerMod
 
 ct.recon.fov = 300.0
-ct.recon.sliceCount = 4        # number of slices to reconstruct
+ct.recon.sliceCount = 1        # number of slices to reconstruct
 ct.recon.sliceThickness = 0.568  # reconstruction inter-slice interval (in mm)
 
 size = ct.recon.imageSize if hasattr(ct.recon, "imageSize") else 512
@@ -49,29 +49,29 @@ pixel_size = fov_mm / size   # mm per pixel
 # Phantom 1: Water bowl + iron rod 
 # ============================================================
 
-# phantom = np.zeros((size, size))  # air
+phantom = np.zeros((size, size))  # air
 
-# # Bowl: full rectangular water container with curved top
-# cx_bowl = size // 2
-# cy_bowl = int(size * 0.5)    # center at middle
-# radius_bowl = int(size * 0.48)
+# Bowl: full rectangular water container with curved top
+cx_bowl = size // 2
+cy_bowl = int(size * 0.5)    # center at middle
+radius_bowl = int(size * 0.48)
 
-# bowl_mask = (X - cx_bowl)**2 + (Y - cy_bowl)**2 <= radius_bowl**2
+bowl_mask = (X - cx_bowl)**2 + (Y - cy_bowl)**2 <= radius_bowl**2
 
-# # Keep bottom portion only (flat top surface like a bowl)
-# flat_cut = Y > int(size * 0.25)   # cut the top
+# Keep bottom portion only (flat top surface like a bowl)
+flat_cut = Y > int(size * 0.25)   # cut the top
 
-# phantom[bowl_mask & flat_cut] = 1  # water (using 1 for volume fraction, not HU)
+phantom[bowl_mask & flat_cut] = 1  # water (using 1 for volume fraction, not HU)
 
-# # ---- Iron rod (11.6 mm diameter)
-# rod_radius_mm = 11.6 / 2
-# rod_radius_px = int(rod_radius_mm / pixel_size)
+# ---- Iron rod (11.6 mm diameter)
+rod_radius_mm = 11.6 / 2
+rod_radius_px = int(rod_radius_mm / pixel_size)
 
-# cx = int(size * 0.40)
-# cy = int(size * 0.55)
+cx = int(size * 0.40)
+cy = int(size * 0.55)
 
-# rod_mask = (X - cx)**2 + (Y - cy)**2 <= rod_radius_px**2
-# phantom[rod_mask] = 2   # iron (using 2 to distinguish from water)
+rod_mask = (X - cx)**2 + (Y - cy)**2 <= rod_radius_px**2
+phantom[rod_mask] = 2   # iron (using 2 to distinguish from water)
 
 
 # ============================================================
@@ -151,8 +151,25 @@ plt.colorbar()
 plt.show()
 
 
+# TURN OFF ALL PHYSICS ARTIFACTS FOR PERFECT BASELINE
+ct.recon.unit = 'HU'
+# 1. Turn off Beam Hardening (Forces a single 70 keV energy instead of a spectrum)
+ct.physics.monochromatic = 70         
+# 2. Turn off Noise (Disables both Poisson quantum noise and sensor noise)
+ct.physics.enableQuantumNoise = 0     
+ct.physics.enableElectronicNoise = 0  
+# 3. Turn off Scatter 
+ct.physics.scatterCallback = ""
+ct.physics.scatterScaleFactor = 0
+# 4. Turn off Exponential Edge-Gradient Effect (EEGE)
+ct.physics.colSampleCount = 1
+ct.physics.rowSampleCount = 1
+ct.physics.srcXSampleCount = 1
+ct.physics.srcYSampleCount = 1
+ct.physics.viewSampleCount = 1
+
 ##--------- Run simulation
-ct.run_all()  # run the scans defined by protocol.scanTypes
+ct.run_all()  
 
 ##--------- Reconstruction
 ct.do_Recon = 1
@@ -164,5 +181,9 @@ import matplotlib.pyplot as plt
 
 imgFname = "%s_%dx%dx%d.raw" %(ct.resultsName, ct.recon.imageSize, ct.recon.imageSize, ct.recon.sliceCount)
 img = xc.rawread(imgFname, [ct.recon.sliceCount, ct.recon.imageSize, ct.recon.imageSize], 'float')
+plt.figure(figsize=(8,8))
 plt.imshow(img[0,:,:], cmap='gray', vmin=-1000, vmax=500)
+plt.colorbar(label='Hounsfield Units (HU)')
+plt.title("Simulated Fan-Beam Reconstruction")
+plt.axis('off')
 plt.show()
