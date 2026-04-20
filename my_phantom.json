@@ -1,8 +1,8 @@
 {
   "n_materials": 2,
   "mat_name": [
-    "plexi",
-    "Ag"
+    "ncat_water",
+    "ncat_iron"
   ],
   "volumefractionmap_filename": [
     "material1.raw",
