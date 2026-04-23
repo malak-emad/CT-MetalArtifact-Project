@@ -17,13 +17,16 @@ def build_common_ct(results_name):
     ct = xc.CatSim("../cfg/Phantom_Sample", "../cfg/Scanner_Sample_generic", "../cfg/Protocol_Sample_axial")
     ct = ctr.setup_clean_baseline(ct)
     ct.resultsName = results_name
-    
-   
+
 
     # Standard Voxelized Phantom config
     ct.phantom.filename = "my_phantom.json"
     ct.phantom.callback = "Phantom_Voxelized"
     ct.phantom.projectorCallback = "C_Projector_Voxelized"
+
+    # CRITICAL FIX: Add these lines to match aliasing_artifact.py
+    ct.phantom.centerOffset = [0.0, 0.0, 0.0]
+    ct.phantom.scale = 1.0
     
     return ct
 
