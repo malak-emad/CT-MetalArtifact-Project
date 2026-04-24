@@ -15,13 +15,12 @@ import scattering as sc
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QComboBox, QDoubleSpinBox, QSpinBox, QFrame, QGridLayout,
-    QProgressBar, QTextEdit, QSplitter, QSizePolicy, QPushButton
+    QProgressBar, QTextEdit, QSplitter, QSizePolicy, QPushButton, QCheckBox
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
-
 
 CACHE_DIR = Path("saved_results")
 CACHE_DIR.mkdir(exist_ok=True)
@@ -29,7 +28,6 @@ CACHE_DIR.mkdir(exist_ok=True)
 def cache_save(key, arr):   np.save(CACHE_DIR / f"{key}.npy", arr)
 def cache_exists(key):      return (CACHE_DIR / f"{key}.npy").exists()
 def cache_load(key):        return np.load(CACHE_DIR / f"{key}.npy") if cache_exists(key) else None
-
 
 BG, PANEL, CARD  = "#0b0f19", "#111827", "#1f2937"
 BORDER, MUTED    = "#374151", "#9ca3af"
@@ -52,6 +50,10 @@ QComboBox, QDoubleSpinBox, QSpinBox {{
 }}
 QComboBox::drop-down {{ border: none; width: 20px; }}
 QComboBox QAbstractItemView {{ background: {CARD}; border: 1px solid {BORDER}; selection-background-color: {ACCENT}; }}
+
+QCheckBox {{ color: {TEXT}; font-size: 12px; spacing: 8px; }}
+QCheckBox::indicator {{ width: 18px; height: 18px; border: 1px solid {BORDER}; border-radius: 4px; background: {CARD}; }}
+QCheckBox::indicator:checked {{ background: {ACCENT}; border-color: {ACCENT}; }}
 
 QPushButton {{
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #2563eb, stop:1 #1d4ed8);
@@ -149,25 +151,71 @@ class Worker(QThread):
 
     def _run_combined(self):
         base = f"p{self.p['phantom_id']}_f{self.p['fov']}_m{self.p['mA']}_v{self.p['views']}_k{self.p['keV']}"
-        wanted = {
-            "Beam Hardening": f"bh_poly_{base}",
-            "Scatter": f"scatter_art_{base}",
-            "Noise": f"noise_nsy_{base}",
-            "Motion": f"motion_{base}",
-            "Aliasing": f"alias_det_{base}"
+        images = {}
+
+        # 1. Beam Hardening
+        bh_key = f"bh_poly_{base}"
+        if cache_exists(bh_key):
+            images["Beam Hardening"] = cache_load(bh_key)
+            self.log.emit("Beam Hardening loaded from cache")
+        else:
+            self.log.emit("▶ Computing missing Beam Hardening...")
+            self.keys = [f"bh_mono_{base}", bh_key]
+            images["Beam Hardening"] = self._run_beam_hardening()["poly"]
+
+        # 2. Scatter
+        sc = self.p.get("scatter_scale", 1000.0)
+        sc_key = f"scatter_art_{base}_sc{sc}"
+        if cache_exists(sc_key):
+            images["Scatter"] = cache_load(sc_key)
+            self.log.emit("Scatter loaded from cache")
+        else:
+            self.log.emit("▶ Computing missing Scatter...")
+            self.keys = [f"scatter_idl_{base}", sc_key]
+            images["Scatter"] = self._run_scatter()["scatter"]
+
+        # 3. Noise
+        nsy_key = f"noise_nsy_{base}"
+        if cache_exists(nsy_key):
+            images["Noise"] = cache_load(nsy_key)
+            self.log.emit("Noise loaded from cache")
+        else:
+            self.log.emit("▶ Computing missing Noise...")
+            self.keys = [f"noise_cln_{base}", nsy_key]
+            images["Noise"] = self._run_noise()["noisy"]
+
+        # 4. Motion
+        s, b = self.p.get("shift_mm", 1.4), self.p.get("break_view", 700)
+        mot_key = f"motion_{base}_s{s}_b{b}"
+        if cache_exists(mot_key):
+            images["Motion"] = cache_load(mot_key)
+            self.log.emit("Motion loaded from cache")
+        else:
+            self.log.emit("▶ Computing missing Motion...")
+            self.keys = [mot_key]
+            images["Motion"] = self._run_motion()["motion"]
+
+        # 5. Aliasing
+        f = self.p.get("view_factor", 4)
+        alias_key = f"alias_det_{base}_vf{f}"
+        if cache_exists(alias_key):
+            images["Aliasing"] = cache_load(alias_key)
+            self.log.emit("Aliasing loaded from cache")
+        else:
+            self.log.emit("▶ Computing missing Aliasing...")
+            self.keys = [alias_key, f"alias_view_{base}_vf{f}"]
+            images["Aliasing"] = self._run_aliasing()["detector"]
+
+        self.log.emit("All artifacts ready. Generating combined image...")
+        combined = np.mean(np.stack(list(images.values()), axis=0), axis=0)
+        return {
+            "type": "combined", 
+            "images": images, 
+            "combined": combined, 
+            "phantom_id": self.p["phantom_id"],
+            "show_all": self.p.get("show_all", False)  
         }
-        images, missing = {}, []
-        for lbl, prefix in wanted.items():
-            hits = sorted(CACHE_DIR.glob(f"{prefix}*.npy"))
-            if hits:
-                images[lbl] = np.load(hits[-1])
-                self.log.emit(f"✓ {lbl} loaded from cache")
-            else: missing.append(lbl)
-            
-        if missing: 
-            raise RuntimeError(f"Missing cached runs for this specific parameter combination:\n{', '.join(missing)}\nPlease run them individually first.")
-            
-        return {"type": "combined", "images": images, "combined": np.mean(np.stack(list(images.values()), axis=0), axis=0), "phantom_id": self.p["phantom_id"]}
+
 
 class App(QMainWindow):
     def __init__(self):
@@ -195,7 +243,7 @@ class App(QMainWindow):
         
         split.setSizes([700, 150]); v_lay.addWidget(split)
 
-        # Sidebar 
+        # Sidebar (Left Side)
         sidebar = QWidget(); sidebar.setObjectName("sidebar"); sidebar.setFixedWidth(300)
         s_lay = QVBoxLayout(sidebar); s_lay.setContentsMargins(20, 25, 20, 25); s_lay.setSpacing(10)
         
@@ -203,7 +251,6 @@ class App(QMainWindow):
         tag = QLabel("Artifact Simulation"); tag.setObjectName("tagline"); tag.setAlignment(Qt.AlignCenter); s_lay.addWidget(tag)
         s_lay.addWidget(self._div())
 
-        # Inputs
         self.combo_artifact = QComboBox(); self.combo_artifact.addItems(["Aliasing", "Beam Hardening", "Motion", "Noise", "Scatter", "Combined"])
         self.combo_artifact.currentTextChanged.connect(self._refresh_spec)
         self.combo_phantom  = QComboBox(); self.combo_phantom.addItems(["Phantom 1 — Water & Iron", "Phantom 2 — Plexi & Silver"])
@@ -251,6 +298,10 @@ class App(QMainWindow):
         if a == "Aliasing": specs = [("View Factor", self._spin(2, 16, 4))]
         elif a == "Motion": specs = [("Shift (mm)", self._dspin(0.1, 20, 1.4, 0.1)), ("Break View", self._spin(1, 999, 700))]
         elif a == "Scatter": specs = [("Scatter Scale", self._dspin(10, 5000, 1000, 100))]
+        elif a == "Combined": 
+            cb = QCheckBox("");
+            cb.setChecked(False) # Default is False (Single large image)
+            specs = [("Show All Artifacts", cb)]
         
         for r, (lbl, w) in enumerate(specs):
             pl = QLabel(lbl); pl.setObjectName("param")
@@ -268,10 +319,10 @@ class App(QMainWindow):
         if "Shift (mm)" in sw: p["shift_mm"] = sw["Shift (mm)"].value()
         if "Break View" in sw: p["break_view"] = sw["Break View"].value()
         if "Scatter Scale" in sw: p["scatter_scale"] = sw["Scatter Scale"].value()
+        if "Show All Artifacts" in sw: p["show_all"] = sw["Show All Artifacts"].isChecked()
         return p
 
     def _get_expected_cache_keys(self, a, p):
-        """Generates exact fingerprints embedding ALL parameters."""
         base = f"p{p['phantom_id']}_f{p['fov']}_m{p['mA']}_v{p['views']}_k{p['keV']}"
         
         if a == "Aliasing":       return [f"alias_det_{base}_vf{p.get('view_factor',4)}", f"alias_view_{base}_vf{p.get('view_factor',4)}"]
@@ -282,7 +333,6 @@ class App(QMainWindow):
         return []
 
     def _reconstruct_from_cache(self, a, p, keys):
-        """Loads data directly into memory without starting the worker thread."""
         pid = p["phantom_id"]
         if a == "Aliasing":       return {"type": "aliasing", "detector": cache_load(keys[0]), "view": cache_load(keys[1])}
         elif a == "Beam Hardening": return {"type": "beam_hardening", "mono": cache_load(keys[0]), "poly": cache_load(keys[1]), "phantom_id": pid}
@@ -298,7 +348,7 @@ class App(QMainWindow):
 
         keys = self._get_expected_cache_keys(a, p)
         if a != "Combined" and keys and all(cache_exists(k) for k in keys):
-            self.log_box.append(f"\n INSTANT LOAD: Exact match found for this specific parameter combination.")
+            self.log_box.append(f"\n INSTANT LOAD")
             result = self._reconstruct_from_cache(a, p, keys)
             self._plot(result)
             return
@@ -316,7 +366,7 @@ class App(QMainWindow):
     def _on_done(self, result):
         self.btn.setEnabled(True)
         self.progress.setVisible(False)
-        self.log_box.append(" Simulation Rendered.")
+        self.log_box.append("Process Complete.")
         self._plot(result)
 
     def _plot(self, res):
@@ -344,10 +394,13 @@ class App(QMainWindow):
         elif t == "scatter":
             ax = self.fig.subplots(1, 2); show(ax[0], res["ideal"], "No Scatter", -1000, 500); show(ax[1], res["scatter"], "Scatter Added", -1000, 500)
         elif t == "combined":
-            imgs, lbls = list(res["images"].values()), list(res["images"].keys())
-            ax = self.fig.subplots(2, 3)
-            for i in range(5): show(ax[i // 3][i % 3], imgs[i], lbls[i], -1000, 500)
-            show(ax[1][2], res["combined"], "Average Combined", -1000, 500)
+            if res.get("show_all", False):
+                imgs, lbls = list(res["images"].values()), list(res["images"].keys())
+                ax = self.fig.subplots(2, 3)
+                for i in range(5): show(ax[i // 3][i % 3], imgs[i], lbls[i], -1000, 500)
+                show(ax[1][2], res["combined"], "Average Combined", -1000, 500)
+            else:
+                show(self.fig.subplots(1, 1), res["combined"], "Combined Artifacts (Average of All 5)", -1000, 500)
 
         self.fig.patch.set_facecolor(BG); self.fig.tight_layout()
         self.canvas.draw()
