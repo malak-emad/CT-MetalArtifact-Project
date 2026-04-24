@@ -13,7 +13,7 @@ import phantom_definitions as pd
 import ct_reconstruction as ctr
 
 
-def build_common_ct(results_name):
+def build_common_ct(results_name, params=None):
     """
     Create a CatSim object with your clean baseline settings
     and the voxelized phantom configuration.
@@ -26,6 +26,15 @@ def build_common_ct(results_name):
 
     ct.resultsName = results_name
     ct = ctr.setup_clean_baseline(ct)
+
+    if params:
+        if "fov"   in params: ct.recon.fov                  = params["fov"]
+        if "mA"    in params: ct.protocol.mA                = params["mA"]
+        if "keV"   in params: ct.physics.monochromatic       = params["keV"]
+        if "views" in params:
+            ct.protocol.viewsPerRotation = params["views"]
+            ct.protocol.viewCount        = params["views"]
+            ct.protocol.stopViewId       = params["views"] - 1
 
     # Phantom configuration
     ct.phantom.filename = "my_phantom.json"
@@ -63,7 +72,7 @@ def run_scan_and_recon(ct):
     return read_recon_image(ct)
 
 
-def simulate_one_phantom(phantom_id, phantom_name, size, pixel_size, X, Y, noisy_mA=100):
+def simulate_one_phantom(phantom_id, phantom_name, size, pixel_size, X, Y, noisy_mA=100, params=None):
     """
     Generate one phantom, run clean + noisy scans, and return all 3 images.
     """
@@ -78,7 +87,7 @@ def simulate_one_phantom(phantom_id, phantom_name, size, pixel_size, X, Y, noisy
         raise ValueError("phantom_id must be 1 or 2")
 
     # CLEAN
-    ct_clean = build_common_ct(f"noise_clean_p{phantom_id}")
+    ct_clean = build_common_ct(f"noise_clean_p{phantom_id}", params)
     ct_clean.physics.enableQuantumNoise = 0
     ct_clean.physics.enableElectronicNoise = 0
     clean_img = run_scan_and_recon(ct_clean)
@@ -86,7 +95,7 @@ def simulate_one_phantom(phantom_id, phantom_name, size, pixel_size, X, Y, noisy
     print(f"\n--- Running {phantom_name} noisy scan with Poisson / quantum noise ---")
 
     # NOISY
-    ct_noisy = build_common_ct(f"noise_poisson_p{phantom_id}")
+    ct_noisy = build_common_ct(f"noise_poisson_p{phantom_id}", params)
     ct_noisy.physics.enableQuantumNoise = 1
     ct_noisy.physics.enableElectronicNoise = 0
     ct_noisy.protocol.mA = noisy_mA

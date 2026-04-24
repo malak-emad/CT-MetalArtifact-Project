@@ -12,19 +12,24 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import phantom_definitions as pd
 import ct_reconstruction as ctr
 
-def build_common_ct(results_name):
+def build_common_ct(results_name, params=None):
     """Creates a standard scanner with anti-aliasing enabled."""
     ct = xc.CatSim("../cfg/Phantom_Sample", "../cfg/Scanner_Sample_generic", "../cfg/Protocol_Sample_axial")
     ct = ctr.setup_clean_baseline(ct)
     ct.resultsName = results_name
-    
 
-    # Standard Voxelized Phantom config
+    if params:
+        if "fov"   in params: ct.recon.fov                  = params["fov"]
+        if "mA"    in params: ct.protocol.mA                = params["mA"]
+        if "keV"   in params: ct.physics.monochromatic       = params["keV"]
+        if "views" in params:
+            ct.protocol.viewsPerRotation = params["views"]
+            ct.protocol.viewCount        = params["views"]
+            ct.protocol.stopViewId       = params["views"] - 1
+
     ct.phantom.filename = "my_phantom.json"
     ct.phantom.callback = "Phantom_Voxelized"
     ct.phantom.projectorCallback = "C_Projector_Voxelized"
-
-    # CRITICAL FIX: Add these lines to match aliasing_artifact.py
     ct.phantom.centerOffset = [0.0, 0.0, 0.0]
     ct.phantom.scale = 1.0
     
@@ -40,7 +45,7 @@ def run_scan_and_recon(ct):
     img = xc.rawread(imgFname, [ct.recon.sliceCount, ct.recon.imageSize, ct.recon.imageSize], 'float')
     return img[0, :, :]
 
-def simulate_scatter_one_phantom(phantom_id, size, pixel_size, X, Y):
+def simulate_scatter_one_phantom(phantom_id, size, pixel_size, X, Y, scatter_scale=1000.0, params=None):
     """Runs both Ideal and Scatter scans for a specific phantom."""
     print(f"\n--- Running Phantom {phantom_id} ---")
 
@@ -52,7 +57,7 @@ def simulate_scatter_one_phantom(phantom_id, size, pixel_size, X, Y):
 
     # 2. IDEAL (No Scatter, Monochromatic)
     print(f"  -> Scanning Ideal (No Scatter)...")
-    ct_ideal = build_common_ct(f"scatter_ideal_p{phantom_id}")
+    ct_ideal = build_common_ct(f"scatter_ideal_p{phantom_id}", params)
     ct_ideal.physics.monochromatic = 100
     
     # Explicitly disable scatter (from baseline)
@@ -62,14 +67,14 @@ def simulate_scatter_one_phantom(phantom_id, size, pixel_size, X, Y):
 
     # 3. SCATTER ARTIFACT
     print(f"  -> Scanning with Scatter Enabled...")
-    ct_scatter = build_common_ct(f"scatter_artifact_p{phantom_id}")
+    ct_scatter = build_common_ct(f"scatter_artifact_p{phantom_id}", params)
     
     # CRITICAL: Keep monochromatic ON. If we turn it off, we mix beam hardening with scatter!
     ct_scatter.physics.monochromatic = 70 
     
     # CRITICAL CHANGE: Enable the scatter convolution model
     ct_scatter.physics.scatterCallback = "Scatter_ConvolutionModel"
-    ct_scatter.physics.scatterScaleFactor = 1000.0  # You can increase this (e.g., 2.0) to exaggerate the effect
+    ct_scatter.physics.scatterScaleFactor = scatter_scale
     
     img_scatter = run_scan_and_recon(ct_scatter)
 

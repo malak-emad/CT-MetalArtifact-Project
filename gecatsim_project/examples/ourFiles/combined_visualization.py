@@ -2,6 +2,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 import gecatsim as xc
 import os
+import sys
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from gecatsim.pyfiles.CommonTools import my_path, rawread
+from run_all_artifacts import run_all_artifacts
 
 def find_raw(filename, size=512, search_dirs=None):
     if search_dirs is None:
@@ -126,20 +130,24 @@ def show_phantom_figure(phantom_label, file_map, size=512):
 
 def run_both_phantoms(size=512):
 
-    p1_files = {
-        "Beam Hardening":  "bh_poly_p1_512x512x1.raw",
-        "Scatter":         "scatter_artifact_p1_512x512x1.raw",
-        "Noise (Poisson)": "p1_noisy_512x512x1.raw",
-        "Motion":          "motion_artifact_p1_512x512x1.raw",
-        "Aliasing":        "aliasing_detector_p1_512x512x1.raw",
-    }
+    if not os.path.exists(os.path.join("artifact_outputs", "bh_poly_p1_512x512x1.raw")):
+        run_all_artifacts()
+    else:
+        print("artifact_outputs already exists — skipping simulation, loading saved files.")
 
+    p1_files = {
+    "Beam Hardening":  "artifact_outputs/bh_poly_p1_512x512x1.raw",
+    "Scatter":         "artifact_outputs/scatter_artifact_p1_512x512x1.raw",
+    "Noise (Poisson)": "artifact_outputs/noise_poisson_p1_512x512x1.raw",
+    "Motion":          "artifact_outputs/motion_artifact_p1_512x512x1.raw",
+    "Aliasing":        "artifact_outputs/aliasing_detector_p1_512x512x1.raw",
+}
     p2_files = {
-        "Beam Hardening":  "bh_poly_p2_512x512x1.raw",
-        "Scatter":         "scatter_artifact_p2_512x512x1.raw",
-        "Noise (Poisson)": "p2_noisy_512x512x1.raw",
-        "Motion":          "motion_artifact_p2_512x512x1.raw",
-        "Aliasing":        "aliasing_detector_p2_512x512x1.raw",
+        "Beam Hardening":  "artifact_outputs/bh_poly_p2_512x512x1.raw",
+        "Scatter":         "artifact_outputs/scatter_artifact_p2_512x512x1.raw",
+        "Noise (Poisson)": "artifact_outputs/noise_poisson_p2_512x512x1.raw",
+        "Motion":          "artifact_outputs/motion_artifact_p2_512x512x1.raw",
+        "Aliasing":        "artifact_outputs/aliasing_detector_p2_512x512x1.raw",
     }
 
     combined_p1 = show_phantom_figure(
@@ -152,11 +160,11 @@ def run_both_phantoms(size=512):
     )
 
     # Save combined images as .raw for segmentation
-    combined_p1.astype(np.float32).tofile("combined_p1_512x512x1.raw")
-    combined_p2.astype(np.float32).tofile("combined_p2_512x512x1.raw")
+    combined_p1.astype(np.float32).tofile("artifact_outputs/combined_p1_512x512x1.raw")
+    combined_p2.astype(np.float32).tofile("artifact_outputs/combined_p2_512x512x1.raw")
     print("\nSaved combined images for segmentation:")
-    print("  combined_p1_512x512x1.raw")
-    print("  combined_p2_512x512x1.raw")
+    print("  artifact_outputs/combined_p1_512x512x1.raw")
+    print("  artifact_outputs/combined_p2_512x512x1.raw")
 
     return combined_p1, combined_p2
 

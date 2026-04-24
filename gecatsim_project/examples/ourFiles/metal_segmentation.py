@@ -78,10 +78,10 @@ def run_segmentation_both_phantoms(size=512):
     combined_visualization.py — one result per phantom.
     """
     phantoms = {
-        "Phantom 1 — Water Bowl + Iron Rod":
-            "combined_p1_512x512x1.raw",
-        "Phantom 2 — Plexiglas + Metal Cylinders":
-            "combined_p2_512x512x1.raw",
+    "Phantom 1 — Water Bowl + Iron Rod":
+        "artifact_outputs/combined_p1_512x512x1.raw",
+      "Phantom 2 — Plexiglas + Metal Cylinders":
+     "artifact_outputs/combined_p2_512x512x1.raw",
     }
 
     for label, fname in phantoms.items():

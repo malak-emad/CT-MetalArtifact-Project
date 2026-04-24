@@ -12,19 +12,24 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import phantom_definitions as pd
 import ct_reconstruction as ctr
 
-def build_common_ct(results_name):
+def build_common_ct(results_name, params=None):
     """Creates a standard scanner with anti-aliasing enabled."""
     ct = xc.CatSim("../cfg/Phantom_Sample", "../cfg/Scanner_Sample_generic", "../cfg/Protocol_Sample_axial")
     ct = ctr.setup_clean_baseline(ct)
     ct.resultsName = results_name
 
+    if params:
+        if "fov"   in params: ct.recon.fov                  = params["fov"]
+        if "mA"    in params: ct.protocol.mA                = params["mA"]
+        if "keV"   in params: ct.physics.monochromatic       = params["keV"]
+        if "views" in params:
+            ct.protocol.viewsPerRotation = params["views"]
+            ct.protocol.viewCount        = params["views"]
+            ct.protocol.stopViewId       = params["views"] - 1
 
-    # Standard Voxelized Phantom config
     ct.phantom.filename = "my_phantom.json"
     ct.phantom.callback = "Phantom_Voxelized"
     ct.phantom.projectorCallback = "C_Projector_Voxelized"
-
-    # CRITICAL FIX: Add these lines to match aliasing_artifact.py
     ct.phantom.centerOffset = [0.0, 0.0, 0.0]
     ct.phantom.scale = 1.0
     
@@ -40,7 +45,7 @@ def run_scan_and_recon(ct):
     img = xc.rawread(imgFname, [ct.recon.sliceCount, ct.recon.imageSize, ct.recon.imageSize], 'float')
     return img[0, :, :]
 
-def simulate_bh_one_phantom(phantom_id, size, pixel_size, X, Y):
+def simulate_bh_one_phantom(phantom_id, size, pixel_size, X, Y, params=None):
     """Runs both Ideal and Beam Hardening scans for a specific phantom."""
     print(f"\n--- Running Phantom {phantom_id} ---")
 
@@ -50,15 +55,16 @@ def simulate_bh_one_phantom(phantom_id, size, pixel_size, X, Y):
     elif phantom_id == 2:
         pd.generate_phantom_2(size, pixel_size, X, Y)
 
-    # 2. Monochromatic (Ideal Physics)
-    print(f"  -> Scanning Monochromatic (Ideal)...")
-    ct_mono = build_common_ct(f"bh_mono_p{phantom_id}")
-    ct_mono.physics.monochromatic = 111
+    # 2. Monochromatic (Ideal Physics) — use keV from params if provided
+    mono_keV = params["keV"] if params and "keV" in params else 111
+    print(f"  -> Scanning Monochromatic (Ideal) at {mono_keV} keV...")
+    ct_mono = build_common_ct(f"bh_mono_p{phantom_id}", params)
+    ct_mono.physics.monochromatic = mono_keV
     img_mono = run_scan_and_recon(ct_mono)
 
     # 3. Polychromatic (Beam Hardening Physics)
     print(f"  -> Scanning Polychromatic (Beam Hardening)...")
-    ct_poly = build_common_ct(f"bh_poly_p{phantom_id}")
+    ct_poly = build_common_ct(f"bh_poly_p{phantom_id}", params)
     ct_poly.physics.monochromatic = -1
     img_poly = run_scan_and_recon(ct_poly)
 
