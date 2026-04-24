@@ -13,7 +13,7 @@ import phantom_definitions as pd
 import ct_reconstruction as ctr
 
 
-def build_common_ct(results_name):
+def build_common_ct(results_name, params=None):
     """
     Create a CatSim object with the clean baseline settings
     and voxelized phantom configuration.
@@ -26,6 +26,16 @@ def build_common_ct(results_name):
 
     ct.resultsName = results_name
     ct = ctr.setup_clean_baseline(ct)
+
+    # Apply UI overrides so recon geometry matches the actual scan
+    if params:
+        if "fov"   in params: ct.recon.fov                  = params["fov"]
+        if "mA"    in params: ct.protocol.mA                = params["mA"]
+        if "keV"   in params: ct.physics.monochromatic       = params["keV"]
+        if "views" in params:
+            ct.protocol.viewsPerRotation = params["views"]
+            ct.protocol.viewCount        = params["views"]
+            ct.protocol.stopViewId       = params["views"] - 1
 
     ct.phantom.filename = "my_phantom.json"
     ct.phantom.callback = "Phantom_Voxelized"
@@ -80,15 +90,15 @@ def create_detector_undersampling(sino):
     return sino_ds
 
 
-def create_view_undersampling(sino):
+def create_view_undersampling(sino, factor=4):
     """
-    Simulate view under-sampling by keeping every 4th view
+    Simulate view under-sampling by keeping every `factor`-th view
     and filling missing views by nearest-neighbor copy.
     """
     sino_vs = np.copy(sino)
 
     for i in range(sino.shape[0]):
-        nearest_kept = (i // 4) * 4
+        nearest_kept = (i // factor) * factor
         sino_vs[i, :] = sino[nearest_kept, :]
 
     return sino_vs
