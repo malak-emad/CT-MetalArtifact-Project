@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy import ndimage
 import gecatsim as xc
 import os, sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -13,17 +14,26 @@ def load_combined(filename, size=512):
     img = np.fromfile(filename, dtype=np.float32).reshape((size, size))
     return img
 
-def segment_metal(img, hu_threshold=2500):
+def segment_metal(img, hu_threshold=2500, dilation_radius=3):
     """
-    NMAR Step 1 — Metal Segmentation.
+    NMAR Step 1 — Metal Segmentation (with dilation only).
 
-    The combined image has all 5 artifact types averaged together.
-    Metal regions still appear as very high HU values (>2500 HU)
-    because metal is so bright it dominates even in an average.
-
-    Returns binary mask: 1 = metal, 0 = everything else.
+    Step A: Threshold (same as before)
+    Step B: Dilation — expand mask to include full metal edges
     """
-    return (img > hu_threshold).astype(np.float32)
+
+    # Step A: threshold (same as old)
+    mask = (img > hu_threshold)
+
+    # Step B: dilation (NEW — expand edges)
+    struct = ndimage.generate_binary_structure(2, 2)
+    mask = ndimage.binary_dilation(
+        mask,
+        structure=struct,
+        iterations=dilation_radius
+    )
+
+    return mask.astype(np.float32)
 
 def show_segmentation(img, metal_mask, title=""):
     """
@@ -92,7 +102,7 @@ def run_segmentation_both_phantoms(size=512):
         if img is None:
             continue
 
-        mask = segment_metal(img, hu_threshold=2500)
+        mask = segment_metal(img, hu_threshold=2500, dilation_radius=3)
         n    = int(mask.sum())
 
         print(f"  Metal pixels detected : {n}")

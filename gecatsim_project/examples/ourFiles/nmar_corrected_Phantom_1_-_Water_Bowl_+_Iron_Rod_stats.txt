@@ -1,0 +1,5 @@
+NMAR Results for Phantom 1 — Water Bowl + Iron Rod
+==================================================
+Original HU: min=-1046.8, max=12273.6, mean=-720.0
+Corrected HU: min=-1000.0, max=3000.0, mean=-725.8
+Correction difference: max=9273.6, mean=24.6
