@@ -7,8 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import json
 import sys
-
-# --- MODULAR IMPORT ---
+from skimage.transform import iradon
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import phantom_definitions as pd
 
@@ -57,6 +56,38 @@ def perform_recon_and_plot(ct, plot_title="Simulated Fan-Beam Reconstruction"):
     plt.axis('off')
     plt.show()
 
+def generate_sinogram(ct):
+    n_views = ct.protocol.viewCount
+    n_rows  = ct.scanner.detectorRowCount
+    n_cols  = ct.scanner.detectorColCount
+
+    raw = np.fromfile(f"{ct.resultsName}.prep", dtype=np.float32)
+    projections = raw.reshape(n_views, n_rows, n_cols)
+    sinogram = projections[:, 0, :]  
+    return sinogram
+
+def plot_sinogram(sinogram, title="Fan-Beam Sinogram"):
+    plt.figure(figsize=(8, 8))
+    plt.imshow(sinogram, cmap='gray', aspect='auto')
+    plt.colorbar(label='Log-attenuation (a.u.)')
+    plt.xlabel("Detector column")
+    plt.ylabel("View index")
+    plt.title(title)
+    plt.tight_layout()
+    plt.show()
+
+def reconstruct_from_sinogram(sinogram, output_size=512):
+    theta = np.linspace(0, 360, sinogram.shape[0], endpoint=False)
+    fbp = iradon(sinogram.T, theta=theta, output_size=output_size, filter_name="shepp-logan")
+
+    plt.figure(figsize=(8, 8))
+    plt.imshow(fbp, cmap="gray")
+    plt.colorbar(label="Reconstructed attenuation")
+    plt.title("FBP Reconstruction from Sinogram")
+    plt.axis("off")
+    plt.show()
+    return fbp
+
 
 if __name__ == "__main__":
     my_path.add_search_path(".")
@@ -79,5 +110,8 @@ if __name__ == "__main__":
     ct.phantom.scale = 1.0
 
     ct.run_all()  
-    
     perform_recon_and_plot(ct)
+
+    sinogram = generate_sinogram(ct)
+    plot_sinogram(sinogram)
+    reconstruct_from_sinogram(sinogram, output_size=size)
