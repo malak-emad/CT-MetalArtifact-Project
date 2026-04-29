@@ -551,10 +551,12 @@ def run_nmar(img, metal_mask,
 
 def _save(fig, fname):
     """Helper: save fig and close it."""
+    dirpath = os.path.dirname(fname)
+    if dirpath:
+        os.makedirs(dirpath, exist_ok=True)
     fig.savefig(fname, dpi=150, bbox_inches='tight')
     plt.close(fig)
     print(f"  [plot] Saved → {fname}")
-
 
 def plot_step1_metal_segmentation(img, metal_mask, title="", out_dir="."):
     """
@@ -998,7 +1000,7 @@ def main():
     phantoms = {
         "p1": {
             "name": "Phantom 1 — Water Bowl + Iron Rod",
-            "file": r"artifact_output s\combined_p1_512x512x1.raw",
+            "file": r"artifact_outputs\combined_p1_512x512x1.raw",
             "hu_threshold": 2500,
             "bone_threshold": 200,
         },

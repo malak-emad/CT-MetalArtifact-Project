@@ -1,21 +1,25 @@
 # Copyright 2024, GE Precision HealthCare. All rights reserved.
-import sys, os, traceback
+import sys, os, traceback, json, hashlib
 import numpy as np
 from pathlib import Path
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gecatsim as xc
 from gecatsim.pyfiles.CommonTools import my_path, rawread
-import ct_reconstruction as ctr
 import phantom_definitions as pd
-import aliasing_artifact as aa
-import beam_hardening as bh
+
+import aliasing_artifact
+import beam_hardening
 import motion_artifact
-import noise_artifact as na
-import scattering as sc
+import noise_artifact
+import scattering
+import NMARcopy as nmar  
+
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QComboBox, QDoubleSpinBox, QSpinBox, QFrame, QGridLayout,
-    QProgressBar, QTextEdit, QSplitter, QSizePolicy, QPushButton, QCheckBox
+    QProgressBar, QTextEdit, QSplitter, QSizePolicy, QPushButton,
+    QCheckBox, QTabWidget
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -23,16 +27,23 @@ from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 
 CACHE_DIR = Path("saved_results")
+NMAR_OUT_DIR = Path("nmar_outputs")
 CACHE_DIR.mkdir(exist_ok=True)
+NMAR_OUT_DIR.mkdir(exist_ok=True)
 
-def cache_save(key, arr):   np.save(CACHE_DIR / f"{key}.npy", arr)
-def cache_exists(key):      return (CACHE_DIR / f"{key}.npy").exists()
-def cache_load(key):        return np.load(CACHE_DIR / f"{key}.npy") if cache_exists(key) else None
+def cache_save(key, arr, directory=CACHE_DIR): 
+    np.save(directory / f"{key}.npy", arr)
 
-BG, PANEL, CARD  = "#0b0f19", "#111827", "#1f2937"
-BORDER, MUTED    = "#374151", "#9ca3af"
-ACCENT, GREEN    = "#3b82f6", "#10b981"
-TEXT             = "#f3f4f6"
+def cache_exists(key, directory=CACHE_DIR): 
+    return (directory / f"{key}.npy").exists()
+
+def cache_load(key, directory=CACHE_DIR): 
+    return np.load(directory / f"{key}.npy") if cache_exists(key, directory) else None
+
+# ── Style configuration ───────────────────────────────────────────────────
+BG, PANEL, CARD = "#0b0f19", "#111827", "#1f2937"
+BORDER, MUTED, ACCENT, GREEN = "#374151", "#9ca3af", "#3b82f6", "#10b981"
+TEXT = "#f3f4f6"
 
 QSS = f"""
 * {{ font-family: 'Segoe UI', system-ui, sans-serif; color: {TEXT}; }}
@@ -43,367 +54,403 @@ QMainWindow, QWidget {{ background: {BG}; }}
 #section {{ color: {ACCENT}; font-size: 11px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; margin-top: 10px; }}
 #param {{ color: {MUTED}; font-size: 12px; }}
 #div {{ background: {BORDER}; }}
-
-QComboBox, QDoubleSpinBox, QSpinBox {{
-    background: {CARD}; border: 1px solid {BORDER}; border-radius: 6px;
-    padding: 6px 10px; font-size: 13px; min-height: 24px;
-}}
-QComboBox::drop-down {{ border: none; width: 20px; }}
-QComboBox QAbstractItemView {{ background: {CARD}; border: 1px solid {BORDER}; selection-background-color: {ACCENT}; }}
-
+QTabWidget::pane {{ border: 1px solid {BORDER}; border-radius: 6px; background: {PANEL}; }}
+QTabBar::tab {{ background: {CARD}; color: {MUTED}; padding: 8px 18px; border-radius: 4px; margin-right: 2px; font-size: 12px; font-weight: 600; }}
+QTabBar::tab:selected {{ background: {ACCENT}; color: #ffffff; }}
+QComboBox, QDoubleSpinBox, QSpinBox {{ background: {CARD}; border: 1px solid {BORDER}; border-radius: 6px; padding: 6px 10px; font-size: 13px; min-height: 24px; }}
 QCheckBox {{ color: {TEXT}; font-size: 12px; spacing: 8px; }}
 QCheckBox::indicator {{ width: 18px; height: 18px; border: 1px solid {BORDER}; border-radius: 4px; background: {CARD}; }}
 QCheckBox::indicator:checked {{ background: {ACCENT}; border-color: {ACCENT}; }}
-
-QPushButton {{
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #2563eb, stop:1 #1d4ed8);
-    color: #ffffff; border: none; border-radius: 6px;
-    padding: 12px; font-size: 13px; font-weight: bold; letter-spacing: 1px;
-}}
+QPushButton {{ background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #2563eb, stop:1 #1d4ed8); color: #ffffff; border: none; border-radius: 6px; padding: 12px; font-size: 13px; font-weight: bold; letter-spacing: 1px; }}
 QPushButton:hover {{ background: #3b82f6; }}
-QPushButton:pressed {{ background: #1e40af; }}
 QPushButton:disabled {{ background: {BORDER}; color: {MUTED}; }}
-
-QTextEdit {{
-    background: #000000; border: 1px solid {BORDER}; border-radius: 6px;
-    color: {GREEN}; font-family: 'Consolas', monospace; font-size: 11px; padding: 8px;
-}}
+QTextEdit {{ background: #000000; border: 1px solid {BORDER}; border-radius: 6px; color: {GREEN}; font-family: 'Consolas', monospace; font-size: 11px; padding: 8px; }}
 QProgressBar {{ background: {CARD}; border: 1px solid {BORDER}; border-radius: 4px; height: 6px; text-align: center; }}
 QProgressBar::chunk {{ background: {ACCENT}; border-radius: 3px; }}
 """
 
-class Worker(QThread):
+class SimWorker(QThread):
     done, log, error = pyqtSignal(dict), pyqtSignal(str), pyqtSignal(str)
 
-    def __init__(self, artifact, params, keys):
+    def __init__(self, mode, params):
         super().__init__()
-        self.artifact = artifact
+        self.mode = mode
         self.p = params
-        self.keys = keys
 
     def run(self):
         try:
-            fn = getattr(self, "_run_" + self.artifact.lower().replace(" ", "_"))
+            my_path.add_search_path(".")
+            fn = getattr(self, f"_run_{self.mode.lower().replace(' ', '_')}")
             self.done.emit(fn())
         except Exception as e:
             self.error.emit(f"{e}\n\n{traceback.format_exc()}")
 
     def _setup(self):
-        my_path.add_search_path(".")
-        ct = aa.build_common_ct("ui_temp", params=self.p)
+        ct = aliasing_artifact.build_common_ct("ui_temp", params=self.p)
         sz = getattr(ct.recon, "imageSize", 512)
         px = self.p["fov"] / sz
         Y, X = np.ogrid[:sz, :sz]
         return ct, sz, px, X, Y
 
-    def _pfn(self): return pd.generate_phantom_1 if self.p["phantom_id"] == 1 else pd.generate_phantom_2
+    def _pfn(self):
+        return pd.generate_phantom_1 if self.p["phantom_id"] == 1 else pd.generate_phantom_2
 
+    def _cached(self, key, compute_func, directory=CACHE_DIR):
+        if cache_exists(key, directory):
+            self.log.emit(f"Loaded {key} from cache")
+            return cache_load(key, directory)
+        self.log.emit(f"Computing {key}...")
+        val = compute_func()
+        cache_save(key, val, directory)
+        return val
+
+    # -- Artifact Runners --
     def _run_aliasing(self):
         f = self.p.get("view_factor", 4)
-        ct, sz, px, X, Y = self._setup()
-        self._pfn()(sz, px, X, Y)
-        self.log.emit("Running aliasing forward scan...")
-        ct.resultsName = "aliasing_base"; ct.run_all()
-        sino = rawread("aliasing_base.prep", [ct.protocol.viewCount, ct.scanner.detectorColCount * ct.scanner.detectorRowCount], 'float')
+        base = f"alias_p{self.p['phantom_id']}_f{self.p['fov']}_v{self.p['views']}_vf{f}"
         
-        self.log.emit("Reconstructing detector & view undersampling...")
-        s_d = aa.create_detector_undersampling(sino); s_d.astype(np.float32).tofile("aliasing_detector.prep")
-        img_d = aa.reconstruct_from_prep(aa.build_common_ct("aliasing_detector", params=self.p), "aliasing_detector.prep", "aliasing_detector")
-        
-        s_v = aa.create_view_undersampling(sino, factor=f); s_v.astype(np.float32).tofile("aliasing_view.prep")
-        img_v = aa.reconstruct_from_prep(aa.build_common_ct("aliasing_view", params=self.p), "aliasing_view.prep", "aliasing_view")
-        
-        cache_save(self.keys[0], img_d); cache_save(self.keys[1], img_v)
-        return {"type": "aliasing", "detector": img_d, "view": img_v}
+        def compute_aliasing():
+            ct, sz, px, X, Y = self._setup()
+            self._pfn()(sz, px, X, Y)
+            ct.resultsName = "aliasing_base"; ct.run_all()
+            sino = rawread("aliasing_base.prep", [ct.protocol.viewCount, ct.scanner.detectorColCount * ct.scanner.detectorRowCount], 'float')
+            
+            s_d = aliasing_artifact.create_detector_undersampling(sino)
+            s_d.astype(np.float32).tofile("aliasing_detector.prep")
+            img_d = aliasing_artifact.reconstruct_from_prep(aliasing_artifact.build_common_ct("aliasing_detector", params=self.p), "aliasing_detector.prep", "aliasing_detector")
+            
+            s_v = aliasing_artifact.create_view_undersampling(sino, factor=f)
+            s_v.astype(np.float32).tofile("aliasing_view.prep")
+            img_v = aliasing_artifact.reconstruct_from_prep(aliasing_artifact.build_common_ct("aliasing_view", params=self.p), "aliasing_view.prep", "aliasing_view")
+            return {"detector": img_d, "view": img_v}
+
+        res = self._cached(base, compute_aliasing)
+        return {"type": "aliasing", **res}
 
     def _run_beam_hardening(self):
-        ct_tmp, sz, px, X, Y = self._setup()
-        self.log.emit("Simulating beam hardening...")
-        i_mono, i_poly = bh.simulate_bh_one_phantom(self.p["phantom_id"], sz, px, X, Y, params=self.p)
-        cache_save(self.keys[0], i_mono)
-        cache_save(self.keys[1], i_poly)
-        return {"type": "beam_hardening", "mono": i_mono, "poly": i_poly, "phantom_id": self.p["phantom_id"]}
+        base_mono = f"bh_mono_p{self.p['phantom_id']}_f{self.p['fov']}_k{self.p['keV']}"
+        base_poly = f"bh_poly_p{self.p['phantom_id']}_f{self.p['fov']}_k{self.p['keV']}"
+        
+        ct, sz, px, X, Y = self._setup()
+        mono, poly = beam_hardening.simulate_bh_one_phantom(self.p["phantom_id"], sz, px, X, Y, params=self.p)
+        
+        i_mono = self._cached(base_mono, lambda: mono)
+        i_poly = self._cached(base_poly, lambda: poly)
+        return {"type": "beam_hardening", "mono": i_mono, "poly": i_poly}
 
     def _run_motion(self):
-        shift, bv = self.p.get("shift_mm", 1.4), self.p.get("break_view", 700)
-        ct, sz, px, X, Y = self._setup()
-        self.log.emit(f"Simulating motion (shift={shift}mm)...")
-        img = motion_artifact.run_motion_artifact(ct, sz, px, X, Y, phantom_fn=self._pfn(), shift_mm=shift, break_view=bv)
-        cache_save(self.keys[0], img)
+        s, bv = self.p.get("shift_mm", 1.4), self.p.get("break_view", 700)
+        base = f"motion_p{self.p['phantom_id']}_f{self.p['fov']}_v{self.p['views']}_s{s}_b{bv}"
+        
+        def compute_motion():
+            ct, sz, px, X, Y = self._setup()
+            return motion_artifact.run_motion_artifact(ct, sz, px, X, Y, phantom_fn=self._pfn(), shift_mm=s, break_view=bv)
+            
+        img = self._cached(base, compute_motion)
         return {"type": "motion", "motion": img}
 
     def _run_noise(self):
-        ct_tmp, sz, px, X, Y = self._setup()
-        self.log.emit("Simulating noise...")
-        i_cln, i_nsy, _ = na.simulate_one_phantom(self.p["phantom_id"], f"Phantom {self.p['phantom_id']}", sz, px, X, Y, noisy_mA=self.p["mA"], params=self.p)
-        cache_save(self.keys[0], i_cln)
-        cache_save(self.keys[1], i_nsy)
-        return {"type": "noise", "clean": i_cln, "noisy": i_nsy, "diff": i_nsy - i_cln}
+        base = f"noise_p{self.p['phantom_id']}_f{self.p['fov']}_mA{self.p['mA']}"
+        
+        def compute_noise():
+            ct, sz, px, X, Y = self._setup()
+            return noise_artifact.simulate_one_phantom(self.p["phantom_id"], f"P{self.p['phantom_id']}", sz, px, X, Y, noisy_mA=self.p["mA"], params=self.p)
+            
+        cln, nsy, _ = self._cached(base, compute_noise)
+        return {"type": "noise", "clean": cln, "noisy": nsy, "diff": nsy - cln}
 
     def _run_scatter(self):
-        scale = self.p.get("scatter_scale", 1000.0)
-        ct_tmp, sz, px, X, Y = self._setup()
-        self.log.emit("Simulating scatter...")
-        ideal, sc_art = sc.simulate_scatter_one_phantom(self.p["phantom_id"], sz, px, X, Y, scatter_scale=scale, params=self.p)
-        cache_save(self.keys[0], ideal)
-        cache_save(self.keys[1], sc_art)
-        return {"type": "scatter", "ideal": ideal, "scatter": sc_art}
+        sc_val = self.p.get("scatter_scale", 1000.0)
+        base = f"scatter_p{self.p['phantom_id']}_f{self.p['fov']}_sc{sc_val}"
+        
+        def compute_scatter():
+            ct, sz, px, X, Y = self._setup()
+            return scattering.simulate_scatter_one_phantom(self.p["phantom_id"], sz, px, X, Y, scatter_scale=sc_val, params=self.p)
+            
+        idl, sc_art = self._cached(base, compute_scatter)
+        return {"type": "scatter", "ideal": idl, "scatter": sc_art}
 
     def _run_combined(self):
-        base = f"p{self.p['phantom_id']}_f{self.p['fov']}_m{self.p['mA']}_v{self.p['views']}_k{self.p['keV']}"
-        images = {}
-
-        # 1. Beam Hardening
-        bh_key = f"bh_poly_{base}"
-        if cache_exists(bh_key):
-            images["Beam Hardening"] = cache_load(bh_key)
-            self.log.emit("Beam Hardening loaded from cache")
-        else:
-            self.log.emit("▶ Computing missing Beam Hardening...")
-            self.keys = [f"bh_mono_{base}", bh_key]
-            images["Beam Hardening"] = self._run_beam_hardening()["poly"]
-
-        # 2. Scatter
-        sc = self.p.get("scatter_scale", 1000.0)
-        sc_key = f"scatter_art_{base}_sc{sc}"
-        if cache_exists(sc_key):
-            images["Scatter"] = cache_load(sc_key)
-            self.log.emit("Scatter loaded from cache")
-        else:
-            self.log.emit("▶ Computing missing Scatter...")
-            self.keys = [f"scatter_idl_{base}", sc_key]
-            images["Scatter"] = self._run_scatter()["scatter"]
-
-        # 3. Noise
-        nsy_key = f"noise_nsy_{base}"
-        if cache_exists(nsy_key):
-            images["Noise"] = cache_load(nsy_key)
-            self.log.emit("Noise loaded from cache")
-        else:
-            self.log.emit("▶ Computing missing Noise...")
-            self.keys = [f"noise_cln_{base}", nsy_key]
-            images["Noise"] = self._run_noise()["noisy"]
-
-        # 4. Motion
-        s, b = self.p.get("shift_mm", 1.4), self.p.get("break_view", 700)
-        mot_key = f"motion_{base}_s{s}_b{b}"
-        if cache_exists(mot_key):
-            images["Motion"] = cache_load(mot_key)
-            self.log.emit("Motion loaded from cache")
-        else:
-            self.log.emit("▶ Computing missing Motion...")
-            self.keys = [mot_key]
-            images["Motion"] = self._run_motion()["motion"]
-
-        # 5. Aliasing
-        f = self.p.get("view_factor", 4)
-        alias_key = f"alias_det_{base}_vf{f}"
-        if cache_exists(alias_key):
-            images["Aliasing"] = cache_load(alias_key)
-            self.log.emit("Aliasing loaded from cache")
-        else:
-            self.log.emit("▶ Computing missing Aliasing...")
-            self.keys = [alias_key, f"alias_view_{base}_vf{f}"]
-            images["Aliasing"] = self._run_aliasing()["detector"]
-
-        self.log.emit("All artifacts ready. Generating combined image...")
+        images = {
+            "Beam Hardening": self._run_beam_hardening()["poly"],
+            "Scatter": self._run_scatter()["scatter"],
+            "Noise": self._run_noise()["noisy"],
+            "Motion": self._run_motion()["motion"],
+            "Aliasing": self._run_aliasing()["detector"]
+        }
         combined = np.mean(np.stack(list(images.values()), axis=0), axis=0)
+        return {"type": "combined", "images": images, "combined": combined, "show_all": self.p.get("show_all", False), "show_steps": self.p.get("show_steps", False)}
+
+    def _run_nmar(self):
+        pid, fov = self.p["phantom_id"], self.p["fov"]
+        h_th, ang = self.p["hu_threshold"], self.p["n_angles"]
+        
+        base_key = f"nmar_p{pid}_fov{fov}_th{h_th}_ang{ang}"
+        
+        if cache_exists(f"{base_key}_corrected", NMAR_OUT_DIR):
+            self.log.emit("Loaded complete NMAR from cache")
+            return {
+                "type": "nmar",
+                "original": cache_load(f"{base_key}_original", NMAR_OUT_DIR),
+                "corrected": cache_load(f"{base_key}_corrected", NMAR_OUT_DIR),
+                "sino_norm": cache_load(f"{base_key}_sino_norm", NMAR_OUT_DIR),
+                "sino_corr": cache_load(f"{base_key}_sino_corr", NMAR_OUT_DIR),
+                "metal_trace": cache_load(f"{base_key}_metal_trace", NMAR_OUT_DIR),
+                "show_steps": self.p.get("show_steps", False)
+            }
+
+        ct, sz, px, X, Y = self._setup()
+        self.log.emit(f"Generating base phantom for NMAR...")
+        img_hu = nmar.simulate_phantom(pid, sz, px, X, Y, params=self.p)
+        metal_mask = nmar.segment_metal(img_hu, hu_threshold=h_th)
+        
+        self.log.emit("Running NMAR pipeline...")
+        results = nmar.run_nmar(img_hu, metal_mask, n_angles=ang, verbose=False)
+        
+        cache_save(f"{base_key}_original", results["img_original"], NMAR_OUT_DIR)
+        cache_save(f"{base_key}_corrected", results["img_final"], NMAR_OUT_DIR)
+        cache_save(f"{base_key}_sino_norm", results["sino_norm"], NMAR_OUT_DIR)
+        cache_save(f"{base_key}_sino_corr", results["sino_corr"], NMAR_OUT_DIR)
+        cache_save(f"{base_key}_metal_trace", results["metal_trace"], NMAR_OUT_DIR)
+
         return {
-            "type": "combined", 
-            "images": images, 
-            "combined": combined, 
-            "phantom_id": self.p["phantom_id"],
-            "show_all": self.p.get("show_all", False)  
+            "type": "nmar", "original": results["img_original"], "corrected": results["img_final"],
+            "sino_norm": results["sino_norm"], "sino_corr": results["sino_corr"], 
+            "metal_trace": results["metal_trace"], "show_steps": self.p.get("show_steps", False)
         }
 
-
+# ── Main Application UI ───────────────────────────────────────────────────
 class App(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("CT Artifact Viewer")
-        self.resize(1400, 850); self.setStyleSheet(QSS)
-        self.worker = None; self.spec_widgets = {}
+        self.resize(1500, 900)
+        self.setStyleSheet(QSS)
+        self.worker = None
 
         root = QWidget(); self.setCentralWidget(root)
-        layout = QHBoxLayout(root); layout.setContentsMargins(0,0,0,0); layout.setSpacing(0)
+        layout = QHBoxLayout(root); layout.setContentsMargins(0, 0, 0, 0); layout.setSpacing(0)
 
-        # Viewer (Right Side)
-        viewer_w = QWidget(); v_lay = QVBoxLayout(viewer_w); v_lay.setContentsMargins(0,0,0,0)
-        split = QSplitter(Qt.Vertical)
+        # ── Global Sidebar ──
+        sidebar = QWidget(); sidebar.setObjectName("sidebar"); sidebar.setFixedWidth(320)
+        self.s_lay = QVBoxLayout(sidebar); self.s_lay.setContentsMargins(20, 25, 20, 25); self.s_lay.setSpacing(10)
+
+        logo = QLabel("CT·SIM"); logo.setObjectName("logo"); logo.setAlignment(Qt.AlignCenter); self.s_lay.addWidget(logo)
+        tag = QLabel("Artifact Simulation"); tag.setObjectName("tagline"); tag.setAlignment(Qt.AlignCenter); self.s_lay.addWidget(tag)
+        self.s_lay.addWidget(self._div())
+
+        # Initialize all possible input widgets globally
+        self.w_params = {
+            "Phantom": QComboBox(),
+            "Artifact": QComboBox(),
+            "FOV (mm)": self._dspin(100, 700, 300, 10),
+            "mA": self._spin(10, 1200, 800),
+            "Views": self._spin(100, 3000, 1000),
+            "keV": self._spin(40, 140, 70),
+            "View Factor": self._spin(2, 16, 4),
+            "Shift (mm)": self._dspin(0.1, 20, 1.4, 0.1),
+            "Break View": self._spin(1, 999, 700),
+            "Scatter Scale": self._dspin(10, 5000, 1000, 100),
+            "HU Threshold": self._spin(500, 5000, 2500),
+            "N Angles": self._spin(90, 720, 360),
+            "Show Steps": QCheckBox("Show Detailed Steps"),
+            "Show All Artifacts": QCheckBox("Show All Sub-Artifacts")
+        }
         
-        self.fig = Figure(facecolor=BG)
-        self.canvas = FigureCanvas(self.fig); self.canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        split.addWidget(self.canvas)
+        self.w_params["Phantom"].addItems(["Phantom 1 — Water & Iron", "Phantom 2 — Plexi & Silver"])
+        self.w_params["Artifact"].addItems(["Aliasing", "Beam Hardening", "Motion", "Noise", "Scatter", "Combined"])
+        self.w_params["Artifact"].currentTextChanged.connect(self._refresh_visibility)
 
-        log_w = QWidget(); log_w.setStyleSheet(f"background: {PANEL};")
-        l_lay = QVBoxLayout(log_w); l_lay.setContentsMargins(15, 10, 15, 15)
-        l_lbl = QLabel("SIMULATION LOG"); l_lbl.setObjectName("tagline"); l_lay.addWidget(l_lbl)
-        self.log_box = QTextEdit(); self.log_box.setReadOnly(True); self.log_box.setMaximumHeight(120)
-        l_lay.addWidget(self.log_box); split.addWidget(log_w)
+        # Build dynamic grid for settings
+        self.param_rows = {}
+        self.grid = QGridLayout(); self.grid.setSpacing(8)
         
-        split.setSizes([700, 150]); v_lay.addWidget(split)
+        row_idx = 0
+        for name, wid in self.w_params.items():
+            if isinstance(wid, QCheckBox):
+                self.grid.addWidget(wid, row_idx, 0, 1, 2)
+                self.param_rows[name] = {'lbl': wid, 'wid': wid} # Label is part of checkbox
+            else:
+                lbl = QLabel(name); lbl.setObjectName("param")
+                self.grid.addWidget(lbl, row_idx, 0)
+                self.grid.addWidget(wid, row_idx, 1)
+                self.param_rows[name] = {'lbl': lbl, 'wid': wid}
+            row_idx += 1
 
-        # Sidebar (Left Side)
-        sidebar = QWidget(); sidebar.setObjectName("sidebar"); sidebar.setFixedWidth(300)
-        s_lay = QVBoxLayout(sidebar); s_lay.setContentsMargins(20, 25, 20, 25); s_lay.setSpacing(10)
+        self.s_lay.addLayout(self.grid)
+        self.s_lay.addStretch()
+        layout.addWidget(sidebar)
+
+        # ── Right Viewer Area ──
+        right_w = QWidget(); r_lay = QVBoxLayout(right_w); r_lay.setContentsMargins(0, 0, 0, 0)
+        self.tabs = QTabWidget(); self.tabs.setDocumentMode(True)
+        self.tabs.currentChanged.connect(self._refresh_visibility)
+        r_lay.addWidget(self.tabs)
+
+        self.figs = {}
+        for tab_name in ["Artifacts", "NMAR"]:
+            w = QWidget(); l = QVBoxLayout(w); l.setContentsMargins(15, 15, 15, 15)
+            split = QSplitter(Qt.Vertical)
+            
+            fig = Figure(facecolor=BG)
+            canvas = FigureCanvas(fig)
+            canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            self.figs[tab_name] = {"fig": fig, "canvas": canvas}
+            split.addWidget(canvas)
+
+            log_w = QWidget(); log_w.setStyleSheet(f"background: {PANEL};")
+            log_l = QVBoxLayout(log_w); log_l.setContentsMargins(15, 10, 15, 15)
+            log_l.addWidget(QLabel(f"{tab_name.upper()} LOG", objectName="tagline"))
+            
+            log_box = QTextEdit(); log_box.setReadOnly(True); log_box.setMaximumHeight(120)
+            log_l.addWidget(log_box)
+            self.figs[tab_name]["log"] = log_box
+            split.addWidget(log_w)
+            
+            split.setSizes([600, 120])
+            l.addWidget(split, stretch=1)
+            
+            btn = QPushButton(f"▶ RUN {tab_name.upper()}")
+            btn.clicked.connect(lambda _, m=tab_name: self._run(m))
+            prog = QProgressBar(); prog.setRange(0, 0); prog.setVisible(False)
+            l.addWidget(btn); l.addWidget(prog)
+            
+            self.figs[tab_name]["btn"] = btn
+            self.figs[tab_name]["prog"] = prog
+            self.tabs.addTab(w, tab_name)
+
+        layout.addWidget(right_w, stretch=1)
+        self._refresh_visibility() # Initialize view
+
+    # ── Visibility Engine ─────────────────────────────────────────────────────
+    def _refresh_visibility(self):
+        """Dynamically shows/hides sidebar parameters based on active tab & mode."""
+        tab = self.tabs.tabText(self.tabs.currentIndex())
+        art = self.w_params["Artifact"].currentText()
         
-        logo = QLabel("CT·SIM"); logo.setObjectName("logo"); logo.setAlignment(Qt.AlignCenter); s_lay.addWidget(logo)
-        tag = QLabel("Artifact Simulation"); tag.setObjectName("tagline"); tag.setAlignment(Qt.AlignCenter); s_lay.addWidget(tag)
-        s_lay.addWidget(self._div())
+        visible = {"Phantom"} 
 
-        self.combo_artifact = QComboBox(); self.combo_artifact.addItems(["Aliasing", "Beam Hardening", "Motion", "Noise", "Scatter", "Combined"])
-        self.combo_artifact.currentTextChanged.connect(self._refresh_spec)
-        self.combo_phantom  = QComboBox(); self.combo_phantom.addItems(["Phantom 1 — Water & Iron", "Phantom 2 — Plexi & Silver"])
-        s_lay.addWidget(self._sec("Configuration")); s_lay.addWidget(self.combo_artifact); s_lay.addWidget(self.combo_phantom)
-        
-        self.spin_fov   = self._dspin(100, 700, 300, 10)
-        self.spin_mA    = self._spin(10, 1200, 800)
-        self.spin_views = self._spin(100, 3000, 1000)
-        self.spin_keV   = self._spin(40, 140, 70)
-        
-        g = QGridLayout(); g.setSpacing(8)
-        for r, (lbl, w) in enumerate([("FOV (mm)", self.spin_fov), ("mA", self.spin_mA), ("Views", self.spin_views), ("keV", self.spin_keV)]):
-            pl = QLabel(lbl); pl.setObjectName("param")
-            g.addWidget(pl, r, 0); g.addWidget(w, r, 1)
-        s_lay.addWidget(self._sec("Scanner Params")); s_lay.addLayout(g)
+        if tab == "Artifacts":
+            visible.add("Artifact")
+            if art == "Aliasing": visible.update(["FOV (mm)", "Views", "View Factor"])
+            elif art == "Beam Hardening": visible.update(["FOV (mm)", "keV"])
+            elif art == "Motion": visible.update(["FOV (mm)", "Views", "Shift (mm)", "Break View"])
+            elif art == "Noise": visible.update(["FOV (mm)", "mA"])
+            elif art == "Scatter": visible.update(["FOV (mm)", "Scatter Scale"])
+            elif art == "Combined": visible.update(["FOV (mm)", "mA", "Views", "keV", "Show All Artifacts", "Show Steps"])
+        else: # NMAR
+            # Only show NMAR specific settings
+            visible.update(["HU Threshold", "N Angles", "Show Steps"])
 
-        s_lay.addWidget(self._sec("Artifact Params"))
-        self.spec_grid = QGridLayout(); self.spec_grid.setSpacing(8); s_lay.addLayout(self.spec_grid)
-        self._refresh_spec()
-        s_lay.addStretch()
-
-        s_lay.addWidget(self._div())
-        self.btn = QPushButton("▶ RUN SIMULATION")
-        self.btn.clicked.connect(self._run)
-        s_lay.addWidget(self.btn)
-        
-        self.progress = QProgressBar(); self.progress.setRange(0, 0); self.progress.setVisible(False)
-        s_lay.addWidget(self.progress)
-
-        layout.addWidget(sidebar); layout.addWidget(viewer_w, stretch=1)
+        for name, row in self.param_rows.items():
+            is_vis = name in visible
+            if name in ["Show Steps", "Show All Artifacts"]:
+                row['wid'].setVisible(is_vis)
+            else:
+                row['lbl'].setVisible(is_vis)
+                row['wid'].setVisible(is_vis)
 
     def _div(self): f = QFrame(); f.setObjectName("div"); f.setFixedHeight(1); return f
-    def _sec(self, t): l = QLabel(t); l.setObjectName("section"); return l
     def _spin(self, lo, hi, val): w = QSpinBox(); w.setRange(lo, hi); w.setValue(val); return w
     def _dspin(self, lo, hi, val, step=1.0): w = QDoubleSpinBox(); w.setRange(lo, hi); w.setValue(val); w.setSingleStep(step); return w
 
-    def _refresh_spec(self):
-        while self.spec_grid.count():
-            item = self.spec_grid.takeAt(0)
-            if item.widget(): item.widget().deleteLater()
-        self.spec_widgets.clear()
-        
-        a = self.combo_artifact.currentText()
-        specs = []
-        if a == "Aliasing": specs = [("View Factor", self._spin(2, 16, 4))]
-        elif a == "Motion": specs = [("Shift (mm)", self._dspin(0.1, 20, 1.4, 0.1)), ("Break View", self._spin(1, 999, 700))]
-        elif a == "Scatter": specs = [("Scatter Scale", self._dspin(10, 5000, 1000, 100))]
-        elif a == "Combined": 
-            cb = QCheckBox("");
-            cb.setChecked(False) # Default is False (Single large image)
-            specs = [("Show All Artifacts", cb)]
-        
-        for r, (lbl, w) in enumerate(specs):
-            pl = QLabel(lbl); pl.setObjectName("param")
-            self.spec_grid.addWidget(pl, r, 0); self.spec_grid.addWidget(w, r, 1)
-            self.spec_widgets[lbl] = w
-
-    def _params(self):
-        p = {
-            "fov": self.spin_fov.value(), "mA": self.spin_mA.value(),
-            "views": self.spin_views.value(), "keV": self.spin_keV.value(),
-            "phantom_id": self.combo_phantom.currentIndex() + 1,
+    def _get_current_params(self):
+        w = self.w_params
+        return {
+            "phantom_id": w["Phantom"].currentIndex() + 1,
+            "fov": w["FOV (mm)"].value(), "mA": w["mA"].value(),
+            "views": w["Views"].value(), "keV": w["keV"].value(),
+            "view_factor": w["View Factor"].value(),
+            "shift_mm": w["Shift (mm)"].value(), "break_view": w["Break View"].value(),
+            "scatter_scale": w["Scatter Scale"].value(),
+            "hu_threshold": w["HU Threshold"].value(), "n_angles": w["N Angles"].value(),
+            "show_steps": w["Show Steps"].isChecked(),
+            "show_all": w["Show All Artifacts"].isChecked()
         }
-        sw = self.spec_widgets
-        if "View Factor" in sw: p["view_factor"] = sw["View Factor"].value()
-        if "Shift (mm)" in sw: p["shift_mm"] = sw["Shift (mm)"].value()
-        if "Break View" in sw: p["break_view"] = sw["Break View"].value()
-        if "Scatter Scale" in sw: p["scatter_scale"] = sw["Scatter Scale"].value()
-        if "Show All Artifacts" in sw: p["show_all"] = sw["Show All Artifacts"].isChecked()
-        return p
 
-    def _get_expected_cache_keys(self, a, p):
-        base = f"p{p['phantom_id']}_f{p['fov']}_m{p['mA']}_v{p['views']}_k{p['keV']}"
+    # ── Execution & Plotting ──────────────────────────────────────────────────
+    def _run(self, tab_name):
+        p = self._get_current_params()
+        mode = self.w_params["Artifact"].currentText() if tab_name == "Artifacts" else "NMAR"
         
-        if a == "Aliasing":       return [f"alias_det_{base}_vf{p.get('view_factor',4)}", f"alias_view_{base}_vf{p.get('view_factor',4)}"]
-        elif a == "Beam Hardening": return [f"bh_mono_{base}", f"bh_poly_{base}"]
-        elif a == "Motion":       return [f"motion_{base}_s{p.get('shift_mm',1.4)}_b{p.get('break_view',700)}"]
-        elif a == "Noise":        return [f"noise_cln_{base}", f"noise_nsy_{base}"]
-        elif a == "Scatter":      return [f"scatter_idl_{base}", f"scatter_art_{base}_sc{p.get('scatter_scale',1000.0)}"]
-        return []
+        controls = self.figs[tab_name]
+        controls["btn"].setEnabled(False)
+        controls["prog"].setVisible(True)
+        controls["log"].append(f"\n[{mode}] Initiating Execution...")
 
-    def _reconstruct_from_cache(self, a, p, keys):
-        pid = p["phantom_id"]
-        if a == "Aliasing":       return {"type": "aliasing", "detector": cache_load(keys[0]), "view": cache_load(keys[1])}
-        elif a == "Beam Hardening": return {"type": "beam_hardening", "mono": cache_load(keys[0]), "poly": cache_load(keys[1]), "phantom_id": pid}
-        elif a == "Motion":       return {"type": "motion", "motion": cache_load(keys[0])}
-        elif a == "Noise":
-            c, n = cache_load(keys[0]), cache_load(keys[1])
-            return {"type": "noise", "clean": c, "noisy": n, "diff": n - c}
-        elif a == "Scatter":      return {"type": "scatter", "ideal": cache_load(keys[0]), "scatter": cache_load(keys[1])}
-
-    def _run(self):
-        a = self.combo_artifact.currentText()
-        p = self._params()
-
-        keys = self._get_expected_cache_keys(a, p)
-        if a != "Combined" and keys and all(cache_exists(k) for k in keys):
-            self.log_box.append(f"\n INSTANT LOAD")
-            result = self._reconstruct_from_cache(a, p, keys)
-            self._plot(result)
-            return
-
-        self.log_box.append(f"\n COMPUTING [{a}] FOV={p['fov']} mA={p['mA']} Views={p['views']} {p['keV']}keV")
-        self.btn.setEnabled(False)
-        self.progress.setVisible(True)
-        
-        self.worker = Worker(a, p, keys)
-        self.worker.log.connect(lambda m: self.log_box.append(f"  {m}"))
-        self.worker.done.connect(self._on_done)
-        self.worker.error.connect(lambda e: self.log_box.append(f"✖ ERROR: {e}"))
+        self.worker = SimWorker(mode, p)
+        self.worker.log.connect(lambda m: controls["log"].append(f"  {m}"))
+        self.worker.error.connect(lambda e: controls["log"].append(f"ERROR: {e}"))
+        self.worker.done.connect(lambda res: self._on_done(res, tab_name))
         self.worker.start()
 
-    def _on_done(self, result):
-        self.btn.setEnabled(True)
-        self.progress.setVisible(False)
-        self.log_box.append("Process Complete.")
-        self._plot(result)
-
-    def _plot(self, res):
-        self.fig.clear()
+    def _on_done(self, res, tab_name):
+        controls = self.figs[tab_name]
+        controls["btn"].setEnabled(True)
+        controls["prog"].setVisible(False)
+        controls["log"].append("Execution Complete.")
         
+        fig, canvas = controls["fig"], controls["canvas"]
+        fig.clear()
+
         def show(ax, img, title, vmin=None, vmax=None, cmap='gray'):
             ax.set_facecolor(BG); ax.axis("off")
-            ax.set_title(title, color=ACCENT, fontsize=10, pad=8, fontfamily="Segoe UI")
+            ax.set_title(title, color=ACCENT, fontsize=10, pad=8)
             vmin = vmin if vmin is not None else float(np.percentile(img, 1))
             vmax = vmax if vmax is not None else float(np.percentile(img, 99))
-            im = ax.imshow(img, cmap=cmap, vmin=vmin, vmax=vmax)
-            cb = self.fig.colorbar(im, ax=ax, fraction=0.04, pad=0.03)
-            cb.ax.yaxis.set_tick_params(color=TEXT, labelsize=8)
-            plt.setp(cb.ax.yaxis.get_ticklabels(), color=TEXT)
+            cb = fig.colorbar(ax.imshow(img, cmap=cmap, vmin=vmin, vmax=vmax), ax=ax, fraction=0.04, pad=0.03)
+            cb.ax.yaxis.set_tick_params(color=TEXT, labelsize=8); plt.setp(cb.ax.yaxis.get_ticklabels(), color=TEXT)
 
         t = res["type"]
         if t == "aliasing":
-            ax = self.fig.subplots(1, 2); show(ax[0], res["detector"], "Detector Under-Sampling"); show(ax[1], res["view"], "View Under-Sampling")
+            ax = fig.subplots(1, 2)
+            show(ax[0], res["detector"], "Detector Under-Sampling")
+            show(ax[1], res["view"], "View Under-Sampling")
         elif t == "beam_hardening":
-            ax = self.fig.subplots(1, 2); show(ax[0], res["mono"], "Monochromatic", -1000, 500); show(ax[1], res["poly"], "Polychromatic", -1000, 500)
+            ax = fig.subplots(1, 2)
+            show(ax[0], res["mono"], "Monochromatic", -1000, 500)
+            show(ax[1], res["poly"], "Polychromatic", -1000, 500)
         elif t == "motion":
-            show(self.fig.subplots(1, 1), res["motion"], "Motion Artifact", -1000, 500)
+            show(fig.subplots(1, 1), res["motion"], "Motion Artifact", -1000, 500)
         elif t == "noise":
-            ax = self.fig.subplots(1, 3); show(ax[0], res["clean"], "Clean", -1000, 500); show(ax[1], res["noisy"], "Poisson Noise", -1000, 500); show(ax[2], res["diff"], "Difference", cmap='bwr')
+            ax = fig.subplots(1, 3)
+            show(ax[0], res["clean"], "Clean", -1000, 500)
+            show(ax[1], res["noisy"], "Poisson Noise", -1000, 500)
+            show(ax[2], res["diff"], "Difference", cmap='bwr')
         elif t == "scatter":
-            ax = self.fig.subplots(1, 2); show(ax[0], res["ideal"], "No Scatter", -1000, 500); show(ax[1], res["scatter"], "Scatter Added", -1000, 500)
+            ax = fig.subplots(1, 2)
+            show(ax[0], res["ideal"], "No Scatter", -1000, 500)
+            show(ax[1], res["scatter"], "Scatter Added", -1000, 500)
         elif t == "combined":
-            if res.get("show_all", False):
-                imgs, lbls = list(res["images"].values()), list(res["images"].keys())
-                ax = self.fig.subplots(2, 3)
-                for i in range(5): show(ax[i // 3][i % 3], imgs[i], lbls[i], -1000, 500)
+            if res.get("show_steps"):
+                ax = fig.subplots(2, 3)
+                imgs = list(res["images"].values()); lbls = list(res["images"].keys())
+                for i in range(min(5, len(imgs))): show(ax[i//3][i%3], imgs[i], lbls[i], -1000, 500)
+                show(ax[1][2], res["combined"], "Average Combined", -1000, 500)
+            elif res.get("show_all"):
+                ax = fig.subplots(2, 3)
+                imgs = list(res["images"].values()); lbls = list(res["images"].keys())
+                for i in range(5): show(ax[i//3][i%3], imgs[i], lbls[i], -1000, 500)
                 show(ax[1][2], res["combined"], "Average Combined", -1000, 500)
             else:
-                show(self.fig.subplots(1, 1), res["combined"], "Combined Artifacts (Average of All 5)", -1000, 500)
+                show(fig.subplots(1, 1), res["combined"], "Combined Artifacts", -1000, 500)
+        elif t == "nmar":
+            if res.get("show_steps"):
+                ax = fig.subplots(2, 3)
+                show(ax[0][0], res["original"], "Before NMAR", -1000, 500)
+                show(ax[0][1], res["corrected"], "After NMAR", -1000, 500)
+                show(ax[0][2], res["corrected"] - res["original"], "Difference Map", cmap='bwr')
+                show(ax[1][0], res["sino_norm"], "Normalized Sinogram")
+                show(ax[1][1], res["sino_corr"], "Corrected Sinogram")
+                show(ax[1][2], res["metal_trace"].astype(np.float32), "Metal Trace", cmap='hot')
+            else:
+                ax = fig.subplots(1, 2)
+                show(ax[0], res["original"], "Before NMAR", -1000, 500)
+                show(ax[1], res["corrected"], "After NMAR (Corrected)", -1000, 500)
 
-        self.fig.patch.set_facecolor(BG); self.fig.tight_layout()
-        self.canvas.draw()
+        fig.patch.set_facecolor(BG); fig.tight_layout()
+        canvas.draw()
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
