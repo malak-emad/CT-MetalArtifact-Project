@@ -38,7 +38,7 @@ def cache_exists(key, directory=CACHE_DIR):
     return (directory / f"{key}.npy").exists()
 
 def cache_load(key, directory=CACHE_DIR): 
-    return np.load(directory / f"{key}.npy") if cache_exists(key, directory) else None
+    return np.load(directory / f"{key}.npy", allow_pickle=True).item() if cache_exists(key, directory) else None
 
 # ── Style configuration ───────────────────────────────────────────────────
 BG, PANEL, CARD = "#0b0f19", "#111827", "#1f2937"
