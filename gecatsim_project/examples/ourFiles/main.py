@@ -1,6 +1,7 @@
 # Copyright 2024, GE Precision HealthCare. All rights reserved.
 import sys, os, traceback, json, hashlib
 import numpy as np
+import shutil
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -28,8 +29,11 @@ import matplotlib.pyplot as plt
 
 CACHE_DIR = Path("saved_results")
 NMAR_OUT_DIR = Path("nmar_outputs")
+ARTIFACT_OUT_DIR = Path("artifact_outputs")
+
 CACHE_DIR.mkdir(exist_ok=True)
 NMAR_OUT_DIR.mkdir(exist_ok=True)
+ARTIFACT_OUT_DIR.mkdir(exist_ok=True)
 
 def cache_save(key, arr, directory=CACHE_DIR): 
     np.save(directory / f"{key}.npy", arr)
@@ -46,7 +50,7 @@ def cache_load(key, directory=CACHE_DIR):
         return data.item()        
     return data
 
-# Custom Palette
+# --- Custom Palette ---
 BG, PANEL, CARD = "#EBE3D5", "#DFD6C8", "#EBE3D5"
 BORDER, MUTED, ACCENT, LOG_TEXT = "#D6CFC6", "#7A7285", "#4E6766", "#1E152A"
 TEXT = "#1E152A"
@@ -88,9 +92,24 @@ class SimWorker(QThread):
         try:
             my_path.add_search_path(".")
             fn = getattr(self, f"_run_{self.mode.lower().replace(' ', '_')}")
-            self.done.emit(fn())
+            res = fn()
+            self._cleanup_working_dir() 
+            self.done.emit(res)
         except Exception as e:
             self.error.emit(f"{e}\n\n{traceback.format_exc()}")
+
+    def _cleanup_working_dir(self):
+        """Moves all generated GeCatSim files to artifact_outputs to keep the root clean."""
+        patterns = ["*.raw", "*.prep", "*.air", "*.offset", "*.scan", "my_phantom.json"]
+        for pattern in patterns:
+            for file in Path(".").glob(pattern):
+                try:
+                    dest = ARTIFACT_OUT_DIR / file.name
+                    if dest.exists():
+                        dest.unlink() 
+                    shutil.move(str(file), str(dest))
+                except Exception:
+                    pass # Ignore locked files
 
     def _setup(self):
         ct = aliasing_artifact.build_common_ct("ui_temp", params=self.p)
@@ -272,7 +291,7 @@ class App(QMainWindow):
         self.w_params = {
             "Phantom": QComboBox(),
             "Artifact": QComboBox(),
-            "_Section_Combined": QLabel("Combined Artifacts Parameters"), # Hidden by default
+            "_Section_Combined": QLabel("Combined Artifacts Parameters"), 
             "FOV (mm)": self._dspin(100, 700, 300, 10),
             "mA": self._spin(10, 1200, 800),
             "Views": self._spin(100, 3000, 1000),
@@ -281,7 +300,7 @@ class App(QMainWindow):
             "Shift (mm)": self._dspin(0.1, 20, 1.4, 0.1),
             "Break View": self._spin(1, 999, 700),
             "Scatter Scale": self._dspin(10, 5000, 1000, 100),
-            "_Section_NMAR": QLabel("NMAR Parameters"), # Hidden by default
+            "_Section_NMAR": QLabel("NMAR Parameters"), 
             "HU Threshold": self._spin(500, 5000, 2500),
             "N Angles": self._spin(90, 720, 360),
             "Show Steps": QCheckBox("Show Detailed Steps")
@@ -291,7 +310,6 @@ class App(QMainWindow):
         self.w_params["Artifact"].addItems(["Aliasing", "Beam Hardening", "Motion", "Noise", "Scatter", "Combined"])
         self.w_params["Artifact"].currentTextChanged.connect(self._refresh_visibility)
         
-        # INSTANT CHECKBOX TRIGGER
         self.w_params["Show Steps"].stateChanged.connect(self._replot_instant)
 
         self.param_rows = {}
@@ -338,7 +356,7 @@ class App(QMainWindow):
             log_l.addWidget(QLabel(f"{tab_name.upper()} LOG", objectName="tagline"))
             
             log_box = QTextEdit(); log_box.setReadOnly(True); log_box.setMaximumHeight(120)
-            log_box.setStyleSheet("border: none; background: transparent;") # override border for inner box
+            log_box.setStyleSheet("border: none; background: transparent;") 
             log_l.addWidget(log_box)
             self.figs[tab_name]["log"] = log_box
             split.addWidget(log_w)
@@ -427,7 +445,7 @@ class App(QMainWindow):
         self.worker.start()
 
     def _on_done(self, res, tab_name, instant_update=False):
-        self.last_res[tab_name] = res  # Save the memory for instant toggles
+        self.last_res[tab_name] = res  
         controls = self.figs[tab_name]
         controls["btn"].setEnabled(True)
         controls["prog"].setVisible(False)
