@@ -8,6 +8,47 @@ Fan-beam detector configuration for CT metal artifact simulation (De Man et al. 
    cd gecatsim_project/examples/ourFiles
     python main.py
 
+### Physics-Based Artifacts
+
+**Aliasing Artifact**
+![Aliasing](gecatsim_project/examples/ourFiles/readme%20images/aliasing.png)
+*Under-sampling of detectors and views creates geometric patterns.*
+
+---
+
+**Beam Hardening**
+![Beam Hardening](gecatsim_project/examples/ourFiles/readme%20images/beam%20hardening.png)
+*The spectral shift towards higher average energy causes dark streaks and cupping.*
+
+---
+
+**Scatter Artifact**
+![Scatter](gecatsim_project/examples/ourFiles/readme%20images/scatter.png)
+*Additive background signals from scattered photons distort image intensity.*
+
+---
+
+### Motion & Combined Effects
+
+**Motion Artifact**
+![Motion](gecatsim_project/examples/ourFiles/readme%20images/motion.png)
+*Object inconsistency during the scanning process leads to directional streaks.*
+
+---
+
+**Combined Artifacts**
+![Combined](gecatsim_project/examples/ourFiles/readme%20images/combined%20artifact.png)
+*Multiple artifacts (Noise, Scatter, Beam Hardening ..etc).*
+
+---
+
+### Correction Results
+
+**NMAR Correction**
+![NMAR](gecatsim_project/examples/ourFiles/readme%20images/Nmar.png)
+*The final result after applying Normalization-based Metal Artifact Reduction.*
+
+---
 # CT Metal Artifact Simulation - Detector Configuration
 
 ## My Work (Malak)
