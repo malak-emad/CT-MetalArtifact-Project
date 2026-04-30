@@ -130,10 +130,12 @@ def show_phantom_figure(phantom_label, file_map, size=512):
 
 def run_both_phantoms(size=512):
 
-    if not os.path.exists(os.path.join("artifact_outputs", "bh_poly_p1_512x512x1.raw")):
+    combined_p1_path = os.path.join("artifact_outputs", "combined_p1_512x512x1.raw")
+    if not os.path.exists(combined_p1_path):
+        print("Combined files missing — running full simulation...")
         run_all_artifacts()
     else:
-        print("artifact_outputs already exists — skipping simulation, loading saved files.")
+        print("Artifact files found — reusing existing data.")
 
     p1_files = {
     "Beam Hardening":  "artifact_outputs/bh_poly_p1_512x512x1.raw",

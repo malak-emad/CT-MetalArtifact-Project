@@ -38,34 +38,40 @@ def cache_exists(key, directory=CACHE_DIR):
     return (directory / f"{key}.npy").exists()
 
 def cache_load(key, directory=CACHE_DIR): 
-    return np.load(directory / f"{key}.npy", allow_pickle=True).item() if cache_exists(key, directory) else None
-
+    if not cache_exists(key, directory):
+        return None
+        
+    data = np.load(directory / f"{key}.npy", allow_pickle=True)
+    if data.shape == ():
+        return data.item()        
+    return data
 # ── Style configuration ───────────────────────────────────────────────────
-BG, PANEL, CARD = "#0b0f19", "#111827", "#1f2937"
-BORDER, MUTED, ACCENT, GREEN = "#374151", "#9ca3af", "#3b82f6", "#10b981"
-TEXT = "#f3f4f6"
+BG, PANEL, CARD = "#EBE3D5", "#DFD6C8", "#EBE3D5"
+BORDER, MUTED, ACCENT, LOG_TEXT = "#D6CFC6", "#7A7285", "#4E6766", "#1E152A"
+TEXT = "#1E152A"
 
 QSS = f"""
 * {{ font-family: 'Segoe UI', system-ui, sans-serif; color: {TEXT}; }}
 QMainWindow, QWidget {{ background: {BG}; }}
 #sidebar {{ background: {PANEL}; border-right: 1px solid {BORDER}; }}
 #logo {{ color: {ACCENT}; font-size: 24px; font-weight: 800; letter-spacing: 2px; }}
-#tagline {{ color: {MUTED}; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; }}
-#section {{ color: {ACCENT}; font-size: 11px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; margin-top: 10px; }}
-#param {{ color: {MUTED}; font-size: 12px; }}
+#tagline {{ color: {MUTED}; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; font-weight: bold; }}
+#section {{ color: {ACCENT}; font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; margin-top: 15px; margin-bottom: 5px; }}
+#param {{ color: {TEXT}; font-size: 12px; font-weight: 500; }}
 #div {{ background: {BORDER}; }}
-QTabWidget::pane {{ border: 1px solid {BORDER}; border-radius: 6px; background: {PANEL}; }}
-QTabBar::tab {{ background: {CARD}; color: {MUTED}; padding: 8px 18px; border-radius: 4px; margin-right: 2px; font-size: 12px; font-weight: 600; }}
-QTabBar::tab:selected {{ background: {ACCENT}; color: #ffffff; }}
-QComboBox, QDoubleSpinBox, QSpinBox {{ background: {CARD}; border: 1px solid {BORDER}; border-radius: 6px; padding: 6px 10px; font-size: 13px; min-height: 24px; }}
-QCheckBox {{ color: {TEXT}; font-size: 12px; spacing: 8px; }}
-QCheckBox::indicator {{ width: 18px; height: 18px; border: 1px solid {BORDER}; border-radius: 4px; background: {CARD}; }}
+QTabWidget::pane {{ border: 1px solid {BORDER}; border-radius: 4px; background: {BG}; }}
+QTabBar::tab {{ background: {PANEL}; color: {MUTED}; padding: 8px 18px; border-radius: 4px; margin-right: 2px; font-size: 12px; font-weight: 600; border: 1px solid {BORDER}; }}
+QTabBar::tab:selected {{ background: {ACCENT}; color: {BG}; border-color: {ACCENT}; }}
+QComboBox, QDoubleSpinBox, QSpinBox {{ background: {CARD}; border: 1px solid {BORDER}; border-radius: 4px; padding: 6px 10px; font-size: 13px; min-height: 24px; color: {TEXT}; }}
+QComboBox:hover, QDoubleSpinBox:hover, QSpinBox:hover {{ border: 1px solid {ACCENT}; }}
+QCheckBox {{ color: {TEXT}; font-size: 12px; spacing: 8px; font-weight: 500; }}
+QCheckBox::indicator {{ width: 16px; height: 16px; border: 1px solid {BORDER}; border-radius: 3px; background: {CARD}; }}
 QCheckBox::indicator:checked {{ background: {ACCENT}; border-color: {ACCENT}; }}
-QPushButton {{ background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #2563eb, stop:1 #1d4ed8); color: #ffffff; border: none; border-radius: 6px; padding: 12px; font-size: 13px; font-weight: bold; letter-spacing: 1px; }}
-QPushButton:hover {{ background: #3b82f6; }}
+QPushButton {{ background: {ACCENT}; color: {BG}; border: none; border-radius: 4px; padding: 12px; font-size: 13px; font-weight: bold; letter-spacing: 1px; }}
+QPushButton:hover {{ background: #3b504f; }}
 QPushButton:disabled {{ background: {BORDER}; color: {MUTED}; }}
-QTextEdit {{ background: #000000; border: 1px solid {BORDER}; border-radius: 6px; color: {GREEN}; font-family: 'Consolas', monospace; font-size: 11px; padding: 8px; }}
-QProgressBar {{ background: {CARD}; border: 1px solid {BORDER}; border-radius: 4px; height: 6px; text-align: center; }}
+QTextEdit {{ background: {PANEL}; border: 1px solid {BORDER}; border-radius: 4px; color: {LOG_TEXT}; font-family: 'Consolas', monospace; font-size: 11px; padding: 8px; }}
+QProgressBar {{ background: {BORDER}; border: none; border-radius: 4px; height: 6px; text-align: center; }}
 QProgressBar::chunk {{ background: {ACCENT}; border-radius: 3px; }}
 """
 
@@ -184,9 +190,10 @@ class SimWorker(QThread):
     def _run_nmar(self):
         pid, fov = self.p["phantom_id"], self.p["fov"]
         h_th, ang = self.p["hu_threshold"], self.p["n_angles"]
-        
-        base_key = f"nmar_p{pid}_fov{fov}_th{h_th}_ang{ang}"
-        
+        mA, views, keV, sc = self.p["mA"], self.p["views"], self.p["keV"], self.p.get("scatter_scale", 1000.0)
+
+        base_key = f"nmar_p{pid}_fov{fov}_mA{mA}_v{views}_k{keV}_sc{sc}_th{h_th}_ang{ang}"
+
         if cache_exists(f"{base_key}_corrected", NMAR_OUT_DIR):
             self.log.emit("Loaded complete NMAR from cache")
             return {
@@ -199,14 +206,15 @@ class SimWorker(QThread):
                 "show_steps": self.p.get("show_steps", False)
             }
 
-        ct, sz, px, X, Y = self._setup()
-        self.log.emit(f"Generating base phantom for NMAR...")
-        img_hu = nmar.simulate_phantom(pid, sz, px, X, Y, params=self.p)
+        self.log.emit("Building combined artifact image...")
+        combined_res = self._run_combined()
+        img_hu = combined_res["combined"]
+
         metal_mask = nmar.segment_metal(img_hu, hu_threshold=h_th)
-        
+
         self.log.emit("Running NMAR pipeline...")
         results = nmar.run_nmar(img_hu, metal_mask, n_angles=ang, verbose=False)
-        
+
         cache_save(f"{base_key}_original", results["img_original"], NMAR_OUT_DIR)
         cache_save(f"{base_key}_corrected", results["img_final"], NMAR_OUT_DIR)
         cache_save(f"{base_key}_sino_norm", results["sino_norm"], NMAR_OUT_DIR)
@@ -215,7 +223,7 @@ class SimWorker(QThread):
 
         return {
             "type": "nmar", "original": results["img_original"], "corrected": results["img_final"],
-            "sino_norm": results["sino_norm"], "sino_corr": results["sino_corr"], 
+            "sino_norm": results["sino_norm"], "sino_corr": results["sino_corr"],
             "metal_trace": results["metal_trace"], "show_steps": self.p.get("show_steps", False)
         }
 
@@ -239,10 +247,11 @@ class App(QMainWindow):
         tag = QLabel("Artifact Simulation"); tag.setObjectName("tagline"); tag.setAlignment(Qt.AlignCenter); self.s_lay.addWidget(tag)
         self.s_lay.addWidget(self._div())
 
-        # Initialize all possible input widgets globally
+        # Initialize all possible input widgets globally (Reordered for NMAR Headers)
         self.w_params = {
             "Phantom": QComboBox(),
             "Artifact": QComboBox(),
+            "_Section_Combined": QLabel("Combined Artifacts Parameters"), # Hidden by default
             "FOV (mm)": self._dspin(100, 700, 300, 10),
             "mA": self._spin(10, 1200, 800),
             "Views": self._spin(100, 3000, 1000),
@@ -251,6 +260,7 @@ class App(QMainWindow):
             "Shift (mm)": self._dspin(0.1, 20, 1.4, 0.1),
             "Break View": self._spin(1, 999, 700),
             "Scatter Scale": self._dspin(10, 5000, 1000, 100),
+            "_Section_NMAR": QLabel("NMAR Parameters"), # Hidden by default
             "HU Threshold": self._spin(500, 5000, 2500),
             "N Angles": self._spin(90, 720, 360),
             "Show Steps": QCheckBox("Show Detailed Steps"),
@@ -267,9 +277,12 @@ class App(QMainWindow):
         
         row_idx = 0
         for name, wid in self.w_params.items():
-            if isinstance(wid, QCheckBox):
+            if isinstance(wid, QCheckBox) or name.startswith("_Section_"):
+                if name.startswith("_Section_"):
+                    wid.setObjectName("section")
+                    wid.setAlignment(Qt.AlignLeft | Qt.AlignBottom)
                 self.grid.addWidget(wid, row_idx, 0, 1, 2)
-                self.param_rows[name] = {'lbl': wid, 'wid': wid} # Label is part of checkbox
+                self.param_rows[name] = {'lbl': wid, 'wid': wid} # Label handles its own visibility
             else:
                 lbl = QLabel(name); lbl.setObjectName("param")
                 self.grid.addWidget(lbl, row_idx, 0)
@@ -298,11 +311,12 @@ class App(QMainWindow):
             self.figs[tab_name] = {"fig": fig, "canvas": canvas}
             split.addWidget(canvas)
 
-            log_w = QWidget(); log_w.setStyleSheet(f"background: {PANEL};")
+            log_w = QWidget(); log_w.setStyleSheet(f"background: {PANEL}; border: 1px solid {BORDER}; border-radius: 4px;")
             log_l = QVBoxLayout(log_w); log_l.setContentsMargins(15, 10, 15, 15)
             log_l.addWidget(QLabel(f"{tab_name.upper()} LOG", objectName="tagline"))
             
             log_box = QTextEdit(); log_box.setReadOnly(True); log_box.setMaximumHeight(120)
+            log_box.setStyleSheet("border: none; background: transparent;") # override border for inner box
             log_l.addWidget(log_box)
             self.figs[tab_name]["log"] = log_box
             split.addWidget(log_w)
@@ -310,7 +324,7 @@ class App(QMainWindow):
             split.setSizes([600, 120])
             l.addWidget(split, stretch=1)
             
-            btn = QPushButton(f"▶ RUN {tab_name.upper()}")
+            btn = QPushButton(f"RUN {tab_name.upper()}")
             btn.clicked.connect(lambda _, m=tab_name: self._run(m))
             prog = QProgressBar(); prog.setRange(0, 0); prog.setVisible(False)
             l.addWidget(btn); l.addWidget(prog)
@@ -338,13 +352,16 @@ class App(QMainWindow):
             elif art == "Noise": visible.update(["FOV (mm)", "mA"])
             elif art == "Scatter": visible.update(["FOV (mm)", "Scatter Scale"])
             elif art == "Combined": visible.update(["FOV (mm)", "mA", "Views", "keV", "Show All Artifacts", "Show Steps"])
-        else: # NMAR
-            # Only show NMAR specific settings
-            visible.update(["HU Threshold", "N Angles", "Show Steps"])
+        else: # NMAR Tab
+            # Activate Section Headers + Split Params
+            visible.update([
+                "_Section_Combined", "FOV (mm)", "mA", "Views", "keV", "Scatter Scale",
+                "_Section_NMAR", "HU Threshold", "N Angles", "Show Steps"
+            ])
 
         for name, row in self.param_rows.items():
             is_vis = name in visible
-            if name in ["Show Steps", "Show All Artifacts"]:
+            if name in ["Show Steps", "Show All Artifacts"] or name.startswith("_Section_"):
                 row['wid'].setVisible(is_vis)
             else:
                 row['lbl'].setVisible(is_vis)
@@ -395,7 +412,7 @@ class App(QMainWindow):
 
         def show(ax, img, title, vmin=None, vmax=None, cmap='gray'):
             ax.set_facecolor(BG); ax.axis("off")
-            ax.set_title(title, color=ACCENT, fontsize=10, pad=8)
+            ax.set_title(title, color=ACCENT, fontsize=10, pad=8, weight='bold')
             vmin = vmin if vmin is not None else float(np.percentile(img, 1))
             vmax = vmax if vmax is not None else float(np.percentile(img, 99))
             cb = fig.colorbar(ax.imshow(img, cmap=cmap, vmin=vmin, vmax=vmax), ax=ax, fraction=0.04, pad=0.03)
