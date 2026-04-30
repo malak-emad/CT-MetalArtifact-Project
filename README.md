@@ -1,5 +1,13 @@
 # CT-MetalArtifact-Project
 Fan-beam detector configuration for CT metal artifact simulation (De Man et al. 1999)
+
+# How to Use
+1. Install XCIST: `pip install gecatsim`
+2. Open your terminal and navigate to our working directory:
+   ```bash
+   cd gecatsim_project/examples/ourFiles
+    python main.py
+
 # CT Metal Artifact Simulation - Detector Configuration
 
 ## My Work (Malak)
@@ -21,11 +29,6 @@ Configured the fan-beam detector geometry to match De Man et al. (1999) paper.
   - `Physics_Sample.cfg` - Physics settings (polychromatic spectrum)
   - `Protocol_Sample_axial.cfg` - View and Flux "did not change them just made sure they are right"
   - `Sim_Recon_Sample.py` - Changed it to make sure my configuration is working
-
-## How to Use
-1. Install XCIST: `pip install gecatsim`
-2. Copy these `.cfg` files to `gecatsim/examples/cfg/`
-3. Run simulation: `python Sim_Recon_Sample.py`
 
 ## Verification 
   **Detector fan beam geometry**
