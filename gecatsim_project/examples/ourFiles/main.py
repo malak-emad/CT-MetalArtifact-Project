@@ -13,7 +13,7 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 
-from ui_styles import BG, PANEL, CARD, BORDER, MUTED, ACCENT, LOG_TEXT, TEXT, QSS
+from ui_styles import BG, PANEL, BORDER, ACCENT, TEXT, QSS
 from simulation_worker import SimWorker
 
 
