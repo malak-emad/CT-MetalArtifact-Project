@@ -46,6 +46,7 @@ def cache_load(key, directory=CACHE_DIR):
         return data.item()        
     return data
 
+# Custom Palette
 BG, PANEL, CARD = "#EBE3D5", "#DFD6C8", "#EBE3D5"
 BORDER, MUTED, ACCENT, LOG_TEXT = "#D6CFC6", "#7A7285", "#4E6766", "#1E152A"
 TEXT = "#1E152A"
@@ -134,8 +135,8 @@ class SimWorker(QThread):
         return {"type": "aliasing", **res}
 
     def _run_beam_hardening(self):
-        base_mono = f"bh_mono_p{self.p['phantom_id']}_f{self.p['fov']}_k{self.p['keV']}"
-        base_poly = f"bh_poly_p{self.p['phantom_id']}_f{self.p['fov']}_k{self.p['keV']}"
+        base_mono = f"bh_mono_p{self.p['phantom_id']}_f{self.p['fov']}_v{self.p['views']}_k{self.p['keV']}"
+        base_poly = f"bh_poly_p{self.p['phantom_id']}_f{self.p['fov']}_v{self.p['views']}_k{self.p['keV']}"
         
         ct, sz, px, X, Y = self._setup()
         mono, poly = beam_hardening.simulate_bh_one_phantom(self.p["phantom_id"], sz, px, X, Y, params=self.p)
@@ -156,7 +157,7 @@ class SimWorker(QThread):
         return {"type": "motion", "motion": img}
 
     def _run_noise(self):
-        base = f"noise_p{self.p['phantom_id']}_f{self.p['fov']}_mA{self.p['mA']}"
+        base = f"noise_p{self.p['phantom_id']}_f{self.p['fov']}_v{self.p['views']}_mA{self.p['mA']}"
         
         def compute_noise():
             ct, sz, px, X, Y = self._setup()
@@ -167,7 +168,7 @@ class SimWorker(QThread):
 
     def _run_scatter(self):
         sc_val = self.p.get("scatter_scale", 1000.0)
-        base = f"scatter_p{self.p['phantom_id']}_f{self.p['fov']}_sc{sc_val}"
+        base = f"scatter_p{self.p['phantom_id']}_f{self.p['fov']}_v{self.p['views']}_sc{sc_val}"
         
         def compute_scatter():
             ct, sz, px, X, Y = self._setup()
@@ -177,6 +178,21 @@ class SimWorker(QThread):
         return {"type": "scatter", "ideal": idl, "scatter": sc_art}
 
     def _run_combined(self):
+        p_id, fov, views = self.p['phantom_id'], self.p['fov'], self.p['views']
+        kev, mA = self.p['keV'], self.p['mA']
+        sc = self.p.get('scatter_scale', 1000.0)
+        vf = self.p.get('view_factor', 4)
+        sh = self.p.get('shift_mm', 1.4)
+        bv = self.p.get('break_view', 700)
+        
+        base_key = f"comb_p{p_id}_f{fov}_v{views}_k{kev}_mA{mA}_sc{sc}_vf{vf}_sh{sh}_bv{bv}"
+
+        if cache_exists(base_key, CACHE_DIR):
+            self.log.emit("Loaded Combined Artifacts from cache")
+            res = cache_load(base_key, CACHE_DIR)
+            return {"type": "combined", **res, "show_steps": self.p.get("show_steps", False)}
+
+        self.log.emit("Computing Combined Artifacts...")
         images = {
             "Beam Hardening": self._run_beam_hardening()["poly"],
             "Scatter": self._run_scatter()["scatter"],
@@ -185,14 +201,20 @@ class SimWorker(QThread):
             "Aliasing": self._run_aliasing()["detector"]
         }
         combined = np.mean(np.stack(list(images.values()), axis=0), axis=0)
-        return {"type": "combined", "images": images, "combined": combined, "show_all": self.p.get("show_all", False), "show_steps": self.p.get("show_steps", False)}
+        
+        res_data = {"images": images, "combined": combined}
+        cache_save(base_key, res_data, CACHE_DIR)
+        
+        return {"type": "combined", **res_data, "show_steps": self.p.get("show_steps", False)}
 
     def _run_nmar(self):
         pid, fov = self.p["phantom_id"], self.p["fov"]
         h_th, ang = self.p["hu_threshold"], self.p["n_angles"]
-        mA, views, keV, sc = self.p["mA"], self.p["views"], self.p["keV"], self.p.get("scatter_scale", 1000.0)
+        mA, views, keV = self.p["mA"], self.p["views"], self.p["keV"]
+        sc, vf = self.p.get("scatter_scale", 1000.0), self.p.get("view_factor", 4)
+        sh, bv = self.p.get("shift_mm", 1.4), self.p.get("break_view", 700)
 
-        base_key = f"nmar_p{pid}_fov{fov}_mA{mA}_v{views}_k{keV}_sc{sc}_th{h_th}_ang{ang}"
+        base_key = f"nmar_p{pid}_f{fov}_v{views}_mA{mA}_k{keV}_sc{sc}_vf{vf}_sh{sh}_bv{bv}_th{h_th}_ang{ang}"
 
         if cache_exists(f"{base_key}_corrected", NMAR_OUT_DIR):
             self.log.emit("Loaded complete NMAR from cache")
@@ -234,6 +256,7 @@ class App(QMainWindow):
         self.resize(1500, 900)
         self.setStyleSheet(QSS)
         self.worker = None
+        self.last_res = {"Artifacts": None, "NMAR": None} 
 
         root = QWidget(); self.setCentralWidget(root)
         layout = QHBoxLayout(root); layout.setContentsMargins(0, 0, 0, 0); layout.setSpacing(0)
@@ -261,13 +284,15 @@ class App(QMainWindow):
             "_Section_NMAR": QLabel("NMAR Parameters"), # Hidden by default
             "HU Threshold": self._spin(500, 5000, 2500),
             "N Angles": self._spin(90, 720, 360),
-            "Show Steps": QCheckBox("Show Detailed Steps"),
-            "Show All Artifacts": QCheckBox("Show All Sub-Artifacts")
+            "Show Steps": QCheckBox("Show Detailed Steps")
         }
         
         self.w_params["Phantom"].addItems(["Phantom 1 — Water & Iron", "Phantom 2 — Plexi & Silver"])
         self.w_params["Artifact"].addItems(["Aliasing", "Beam Hardening", "Motion", "Noise", "Scatter", "Combined"])
         self.w_params["Artifact"].currentTextChanged.connect(self._refresh_visibility)
+        
+        # INSTANT CHECKBOX TRIGGER
+        self.w_params["Show Steps"].stateChanged.connect(self._replot_instant)
 
         self.param_rows = {}
         self.grid = QGridLayout(); self.grid.setSpacing(8)
@@ -333,6 +358,13 @@ class App(QMainWindow):
         layout.addWidget(right_w, stretch=1)
         self._refresh_visibility() 
 
+    def _replot_instant(self):
+        """Instantly redraws the plot when a checkbox is toggled without running the thread."""
+        tab_name = self.tabs.tabText(self.tabs.currentIndex())
+        if self.last_res.get(tab_name):
+            self.last_res[tab_name]["show_steps"] = self.w_params["Show Steps"].isChecked()
+            self._on_done(self.last_res[tab_name], tab_name, instant_update=True)
+
     def _refresh_visibility(self):
         """Dynamically shows/hides sidebar parameters based on active tab & mode."""
         tab = self.tabs.tabText(self.tabs.currentIndex())
@@ -343,20 +375,20 @@ class App(QMainWindow):
         if tab == "Artifacts":
             visible.add("Artifact")
             if art == "Aliasing": visible.update(["FOV (mm)", "Views", "View Factor"])
-            elif art == "Beam Hardening": visible.update(["FOV (mm)", "keV"])
+            elif art == "Beam Hardening": visible.update(["FOV (mm)", "Views", "keV"])
             elif art == "Motion": visible.update(["FOV (mm)", "Views", "Shift (mm)", "Break View"])
-            elif art == "Noise": visible.update(["FOV (mm)", "mA"])
-            elif art == "Scatter": visible.update(["FOV (mm)", "Scatter Scale"])
-            elif art == "Combined": visible.update(["FOV (mm)", "mA", "Views", "keV", "Show All Artifacts", "Show Steps"])
+            elif art == "Noise": visible.update(["FOV (mm)", "Views", "mA"])
+            elif art == "Scatter": visible.update(["FOV (mm)", "Views", "Scatter Scale"])
+            elif art == "Combined": visible.update(["FOV (mm)", "mA", "Views", "keV", "View Factor", "Shift (mm)", "Break View", "Scatter Scale", "Show Steps"])
         else: # NMAR Tab
             visible.update([
-                "_Section_Combined", "FOV (mm)", "mA", "Views", "keV", "Scatter Scale",
+                "_Section_Combined", "FOV (mm)", "mA", "Views", "keV", "View Factor", "Shift (mm)", "Break View", "Scatter Scale",
                 "_Section_NMAR", "HU Threshold", "N Angles", "Show Steps"
             ])
 
         for name, row in self.param_rows.items():
             is_vis = name in visible
-            if name in ["Show Steps", "Show All Artifacts"] or name.startswith("_Section_"):
+            if name in ["Show Steps"] or name.startswith("_Section_"):
                 row['wid'].setVisible(is_vis)
             else:
                 row['lbl'].setVisible(is_vis)
@@ -376,8 +408,7 @@ class App(QMainWindow):
             "shift_mm": w["Shift (mm)"].value(), "break_view": w["Break View"].value(),
             "scatter_scale": w["Scatter Scale"].value(),
             "hu_threshold": w["HU Threshold"].value(), "n_angles": w["N Angles"].value(),
-            "show_steps": w["Show Steps"].isChecked(),
-            "show_all": w["Show All Artifacts"].isChecked()
+            "show_steps": w["Show Steps"].isChecked()
         }
 
     def _run(self, tab_name):
@@ -395,11 +426,14 @@ class App(QMainWindow):
         self.worker.done.connect(lambda res: self._on_done(res, tab_name))
         self.worker.start()
 
-    def _on_done(self, res, tab_name):
+    def _on_done(self, res, tab_name, instant_update=False):
+        self.last_res[tab_name] = res  # Save the memory for instant toggles
         controls = self.figs[tab_name]
         controls["btn"].setEnabled(True)
         controls["prog"].setVisible(False)
-        controls["log"].append("Execution Complete.")
+        
+        if not instant_update:
+            controls["log"].append("Execution Complete.")
         
         fig, canvas = controls["fig"], controls["canvas"]
         fig.clear()
@@ -437,11 +471,6 @@ class App(QMainWindow):
                 ax = fig.subplots(2, 3)
                 imgs = list(res["images"].values()); lbls = list(res["images"].keys())
                 for i in range(min(5, len(imgs))): show(ax[i//3][i%3], imgs[i], lbls[i], -1000, 500)
-                show(ax[1][2], res["combined"], "Average Combined", -1000, 500)
-            elif res.get("show_all"):
-                ax = fig.subplots(2, 3)
-                imgs = list(res["images"].values()); lbls = list(res["images"].keys())
-                for i in range(5): show(ax[i//3][i%3], imgs[i], lbls[i], -1000, 500)
                 show(ax[1][2], res["combined"], "Average Combined", -1000, 500)
             else:
                 show(fig.subplots(1, 1), res["combined"], "Combined Artifacts", -1000, 500)
