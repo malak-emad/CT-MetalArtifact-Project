@@ -45,7 +45,7 @@ def cache_load(key, directory=CACHE_DIR):
     if data.shape == ():
         return data.item()        
     return data
-# ── Style configuration ───────────────────────────────────────────────────
+
 BG, PANEL, CARD = "#EBE3D5", "#DFD6C8", "#EBE3D5"
 BORDER, MUTED, ACCENT, LOG_TEXT = "#D6CFC6", "#7A7285", "#4E6766", "#1E152A"
 TEXT = "#1E152A"
@@ -227,7 +227,6 @@ class SimWorker(QThread):
             "metal_trace": results["metal_trace"], "show_steps": self.p.get("show_steps", False)
         }
 
-# ── Main Application UI ───────────────────────────────────────────────────
 class App(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -247,7 +246,6 @@ class App(QMainWindow):
         tag = QLabel("Artifact Simulation"); tag.setObjectName("tagline"); tag.setAlignment(Qt.AlignCenter); self.s_lay.addWidget(tag)
         self.s_lay.addWidget(self._div())
 
-        # Initialize all possible input widgets globally (Reordered for NMAR Headers)
         self.w_params = {
             "Phantom": QComboBox(),
             "Artifact": QComboBox(),
@@ -271,7 +269,6 @@ class App(QMainWindow):
         self.w_params["Artifact"].addItems(["Aliasing", "Beam Hardening", "Motion", "Noise", "Scatter", "Combined"])
         self.w_params["Artifact"].currentTextChanged.connect(self._refresh_visibility)
 
-        # Build dynamic grid for settings
         self.param_rows = {}
         self.grid = QGridLayout(); self.grid.setSpacing(8)
         
@@ -282,7 +279,7 @@ class App(QMainWindow):
                     wid.setObjectName("section")
                     wid.setAlignment(Qt.AlignLeft | Qt.AlignBottom)
                 self.grid.addWidget(wid, row_idx, 0, 1, 2)
-                self.param_rows[name] = {'lbl': wid, 'wid': wid} # Label handles its own visibility
+                self.param_rows[name] = {'lbl': wid, 'wid': wid} 
             else:
                 lbl = QLabel(name); lbl.setObjectName("param")
                 self.grid.addWidget(lbl, row_idx, 0)
@@ -334,9 +331,8 @@ class App(QMainWindow):
             self.tabs.addTab(w, tab_name)
 
         layout.addWidget(right_w, stretch=1)
-        self._refresh_visibility() # Initialize view
+        self._refresh_visibility() 
 
-    # ── Visibility Engine ─────────────────────────────────────────────────────
     def _refresh_visibility(self):
         """Dynamically shows/hides sidebar parameters based on active tab & mode."""
         tab = self.tabs.tabText(self.tabs.currentIndex())
@@ -353,7 +349,6 @@ class App(QMainWindow):
             elif art == "Scatter": visible.update(["FOV (mm)", "Scatter Scale"])
             elif art == "Combined": visible.update(["FOV (mm)", "mA", "Views", "keV", "Show All Artifacts", "Show Steps"])
         else: # NMAR Tab
-            # Activate Section Headers + Split Params
             visible.update([
                 "_Section_Combined", "FOV (mm)", "mA", "Views", "keV", "Scatter Scale",
                 "_Section_NMAR", "HU Threshold", "N Angles", "Show Steps"
@@ -385,7 +380,6 @@ class App(QMainWindow):
             "show_all": w["Show All Artifacts"].isChecked()
         }
 
-    # ── Execution & Plotting ──────────────────────────────────────────────────
     def _run(self, tab_name):
         p = self._get_current_params()
         mode = self.w_params["Artifact"].currentText() if tab_name == "Artifacts" else "NMAR"
