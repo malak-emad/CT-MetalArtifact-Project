@@ -44,7 +44,7 @@ class App(QMainWindow):
             "FOV (mm)": self._dspin(100, 700, 300, 10),
             "mA": self._spin(10, 1200, 800),
             "Views": self._spin(100, 3000, 1000),
-            "keV": self._spin(40, 140, 70),
+            "keV": self._spin(-1, 140, 70),
             "View Factor": self._spin(2, 16, 4),
             "Shift (mm)": self._dspin(0.1, 20, 1.4, 0.1),
             "Break View": self._spin(1, 999, 700),
