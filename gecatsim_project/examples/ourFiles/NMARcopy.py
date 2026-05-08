@@ -11,10 +11,10 @@ PIPELINE (paper Fig. 1):
     ├─ [4] Forward-project original (μ)  →  sino_orig
     ├─ [5] Forward-project prior (μ)  →  sino_prior
     ├─ [6] Normalize: sino_norm = sino_orig / sino_prior  (outside metal trace)
-    ├─ [7] Interpolate metal trace in sino_norm  →  sino_interp   ← NEW
-    ├─ [8] Denormalize: sino_corr = sino_prior * sino_interp       ← NEW
-    ├─ [9] FBP reconstruct sino_corr  →  corrected image           ← NEW
-    └─ [10] Reinsert metal pixels                                   ← NEW
+    ├─ [7] Interpolate metal trace in sino_norm  →  sino_interp   
+    ├─ [8] Denormalize: sino_corr = sino_prior * sino_interp       
+    ├─ [9] FBP reconstruct sino_corr  →  corrected image           
+    └─ [10] Reinsert metal pixels                                   
 
 Visualization functions are all kept SEPARATE (show_* / plot_*).
 """
