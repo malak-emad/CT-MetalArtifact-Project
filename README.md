@@ -51,7 +51,6 @@ Fan-beam detector configuration for CT metal artifact simulation (De Man et al. 
 ---
 # CT Metal Artifact Simulation - Detector Configuration
 
-## My Work (Malak)
 Configured the fan-beam detector geometry to match De Man et al. (1999) paper.
 
 ## Configuration Changes
