@@ -30,13 +30,13 @@ def run_motion_artifact(ct, size, pixel_size, X, Y, phantom_fn,
 
     # Scan A — rest position
     ct.resultsName = "motion_pos_a"
-    phantom_fn(size, pixel_size, X, Y)
+    phantom_fn(size, pixel_size, X, Y) # normal position
     ct.run_all()
     sino_a = rawread("motion_pos_a.prep", [n_views, n_cells], 'float')
 
     # Scan B — shifted position
     ct.resultsName = "motion_pos_b"
-    phantom_fn(size, pixel_size, X, Y - shift_px)
+    phantom_fn(size, pixel_size, X, Y - shift_px) # shifted by shift_mm
     ct.run_all()
     sino_b = rawread("motion_pos_b.prep", [n_views, n_cells], 'float')
 

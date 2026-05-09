@@ -23,16 +23,17 @@ def setup_clean_baseline(ct):
     ct.scanner.detectorRowCount = ct.scanner.detectorRowsPerMod
 
     ct.recon.fov = 300.0
-    ct.recon.sliceCount = 1 
+    ct.recon.sliceCount = 1  # number of slices (2D = 1)
     ct.recon.sliceThickness = 0.568 
 
     # Turn off all physics for a clean baseline 
     ct.recon.unit = 'HU'
-    ct.physics.monochromatic = 70         
-    ct.physics.enableQuantumNoise = 0     
-    ct.physics.enableElectronicNoise = 0  
-    ct.physics.scatterCallback = ""
-    ct.physics.scatterScaleFactor = 0
+    ct.physics.monochromatic = 70         # single energy in keV, or -1 for polychromatic
+    ct.physics.enableQuantumNoise = 0     # 0=off, 1=on
+    ct.physics.enableElectronicNoise = 0  # 0=off, 1=on
+    ct.physics.scatterCallback = ""       # "" = no scatter, or "Scatter_ConvolutionModel"
+    ct.physics.scatterScaleFactor = 0     # magnitude of scatter
+
     ct.physics.colSampleCount = 1
     ct.physics.rowSampleCount = 1
     ct.physics.srcXSampleCount = 1
@@ -76,18 +77,6 @@ def plot_sinogram(sinogram, title="Fan-Beam Sinogram"):
     plt.tight_layout()
     plt.show()
 
-def reconstruct_from_sinogram(sinogram, output_size=512):
-    theta = np.linspace(0, 360, sinogram.shape[0], endpoint=False)
-    fbp = iradon(sinogram.T, theta=theta, output_size=output_size, filter_name="shepp-logan")
-
-    plt.figure(figsize=(8, 8))
-    plt.imshow(fbp, cmap="gray")
-    plt.colorbar(label="Reconstructed attenuation")
-    plt.title("FBP Reconstruction from Sinogram")
-    plt.axis("off")
-    plt.show()
-    return fbp
-
 
 if __name__ == "__main__":
     my_path.add_search_path(".")
@@ -114,4 +103,3 @@ if __name__ == "__main__":
 
     sinogram = generate_sinogram(ct)
     plot_sinogram(sinogram)
-    reconstruct_from_sinogram(sinogram, output_size=size)

@@ -22,10 +22,10 @@ def segment_metal(img, hu_threshold=2500, dilation_radius=3):
     Step B: Dilation — expand mask to include full metal edges
     """
 
-    # Step A: threshold (same as old)
+    # Step A: threshold
     mask = (img > hu_threshold)
 
-    # Step B: dilation (NEW — expand edges)
+    # Step B: dilation 
     struct = ndimage.generate_binary_structure(2, 2)
     mask = ndimage.binary_dilation(
         mask,

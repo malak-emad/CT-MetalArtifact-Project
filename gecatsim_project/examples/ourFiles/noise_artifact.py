@@ -98,7 +98,7 @@ def simulate_one_phantom(phantom_id, phantom_name, size, pixel_size, X, Y, noisy
     ct_noisy = build_common_ct(f"noise_poisson_p{phantom_id}", params)
     ct_noisy.physics.enableQuantumNoise = 1
     ct_noisy.physics.enableElectronicNoise = 0
-    ct_noisy.protocol.mA = noisy_mA
+    ct_noisy.protocol.mA = noisy_mA  # if low current = more noise
     noisy_img = run_scan_and_recon(ct_noisy)
 
     # DIFFERENCE
