@@ -45,7 +45,7 @@ def setup_clean_baseline(ct):
 def perform_recon_and_plot(ct, plot_title="Simulated Fan-Beam Reconstruction"):
     """Runs the reconstruction and plots the resulting .raw image."""
     ct.do_Recon = 1
-    recon.recon(ct)
+    recon.recon(ct)  # applies ramp filter + backprojection internally
 
     imgFname = "%s_%dx%dx%d.raw" %(ct.resultsName, ct.recon.imageSize, ct.recon.imageSize, ct.recon.sliceCount)
     img = xc.rawread(imgFname, [ct.recon.sliceCount, ct.recon.imageSize, ct.recon.imageSize], 'float')
@@ -58,13 +58,17 @@ def perform_recon_and_plot(ct, plot_title="Simulated Fan-Beam Reconstruction"):
     plt.show()
 
 def generate_sinogram(ct):
-    n_views = ct.protocol.viewCount
-    n_rows  = ct.scanner.detectorRowCount
-    n_cols  = ct.scanner.detectorColCount
+    n_views = ct.protocol.viewCount  # number of rotation angles
+    n_rows  = ct.scanner.detectorRowCount # number of detector rows 
+    n_cols  = ct.scanner.detectorColCount # number of detector elements
 
+    # Total values = n_views × n_rows × n_cols
+    # Each number is one attenuation measurement: p = -ln(I_detected / I_0)
     raw = np.fromfile(f"{ct.resultsName}.prep", dtype=np.float32)
     projections = raw.reshape(n_views, n_rows, n_cols)
-    sinogram = projections[:, 0, :]  
+    
+    #sinogram[i, j] = attenuation at angle i, detector position j
+    sinogram = projections[:, 0, :]   # take one slice (2D scan)
     return sinogram
 
 def plot_sinogram(sinogram, title="Fan-Beam Sinogram"):
